@@ -16,4 +16,5 @@ celery_app.conf.update(
     enable_utc=True,
 )
 
-celery_app.autodiscover_tasks(["app.tasks"])
+# Explicit import so tasks register themselves
+import app.tasks.agent_cycles  # noqa: F401

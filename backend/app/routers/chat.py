@@ -55,14 +55,16 @@ async def send_message(
     await db.flush()
     await db.refresh(user_msg)
 
-    # Stub: In production, this would trigger an agent run and return the response.
-    # For now, create a placeholder agent response.
+    # Trigger async agent response via Celery
+    from app.tasks.agent_cycles import run_chat_response
+    run_chat_response.delay(str(company_id), data.department_type.value, data.content)
+
+    # Create immediate acknowledgment (real response comes async)
     agent_msg = AgentMessage(
         company_id=company_id,
         department_id=department.id,
         role=MessageRole.agent,
-        content=f"[Stub] Received your message in the {data.department_type.value} department. "
-                f"Agent integration pending.",
+        content=f"Received. The {data.department_type.value} department is processing your request...",
     )
     db.add(agent_msg)
     await db.flush()

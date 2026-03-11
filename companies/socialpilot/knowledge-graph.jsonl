@@ -1,0 +1,3 @@
+{"id": "cd6f0686-f136-492a-9942-732d3478f71b", "kind": "entity", "type": "company", "name": "SocialPilot AI", "properties": {"mission": "Social media management"}, "source": "system", "created_at": "2026-03-11T13:38:47.234123+00:00"}
+{"id": "602b6539-5350-4ad9-848b-a9ac61685a97", "kind": "entity", "type": "product", "name": "Social Scheduler", "properties": {"stack": "Next.js + FastAPI", "status": "planning"}, "source": "system", "created_at": "2026-03-11T13:38:47.234329+00:00"}
+{"id": "d4f685cd-d826-4203-a0a9-e3fa9845b067", "kind": "entity", "type": "decision", "name": "Start with X/Twitter and LinkedIn posting", "properties": {"why": "Highest ROI platforms for B2B SaaS", "decided_by": "ceo"}, "source": "ceo", "created_at": "2026-03-11T13:38:47.234410+00:00"}
