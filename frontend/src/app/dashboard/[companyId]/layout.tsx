@@ -1,67 +1,43 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useParams } from "next/navigation";
-import { cn } from "@/lib/utils";
-import {
-  LayoutDashboard,
-  Activity,
-  MessageSquare,
-  ListTodo,
-  Settings,
-} from "lucide-react";
+import { useParams, usePathname } from "next/navigation";
 
 const tabs = [
-  { href: "", label: "Overview", icon: LayoutDashboard },
-  { href: "/activity", label: "Activity", icon: Activity },
-  { href: "/chat", label: "Chat", icon: MessageSquare },
-  { href: "/tasks", label: "Tasks", icon: ListTodo },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { label: "Overview", path: "" },
+  { label: "Activity", path: "/activity" },
+  { label: "Chat", path: "/chat" },
+  { label: "Tasks", path: "/tasks" },
+  { label: "Settings", path: "/settings" },
 ];
 
-export default function CompanyLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  const pathname = usePathname();
+export default function CompanyLayout({ children }: { children: React.ReactNode }) {
   const params = useParams();
-  const basePath = `/dashboard/${params.companyId}`;
+  const pathname = usePathname();
+  const companyId = params.companyId as string;
+  const basePath = `/dashboard/${companyId}`;
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold">NexGen AI Solutions</h1>
-        <p className="text-sm text-muted-foreground">/nexgen-ai-solutions</p>
-      </div>
-
-      <nav className="flex gap-1 border-b mb-6 overflow-x-auto">
+      <nav className="flex gap-1 mb-6 border-b border-gray-800 pb-2">
         {tabs.map((tab) => {
-          const href = `${basePath}${tab.href}`;
-          const isActive =
-            tab.href === ""
-              ? pathname === basePath
-              : pathname === href;
-          const Icon = tab.icon;
-
+          const href = `${basePath}${tab.path}`;
+          const isActive = pathname === href || (tab.path === "" && pathname === basePath);
           return (
             <Link
-              key={tab.href}
+              key={tab.path}
               href={href}
-              className={cn(
-                "flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap",
+              className={`px-4 py-2 rounded-t text-sm transition-colors ${
                 isActive
-                  ? "border-primary text-primary"
-                  : "border-transparent text-muted-foreground hover:text-foreground hover:border-border"
-              )}
+                  ? "text-white bg-gray-800 font-medium"
+                  : "text-gray-400 hover:text-gray-200"
+              }`}
             >
-              <Icon className="h-4 w-4" />
               {tab.label}
             </Link>
           );
         })}
       </nav>
-
       {children}
     </div>
   );

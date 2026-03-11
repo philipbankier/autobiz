@@ -71,3 +71,32 @@ async def update_department(
         "error": None,
         "meta": None,
     }
+
+
+@router.post("/{dept_type}/trigger", response_model=dict)
+async def trigger_department(
+    company_id: uuid.UUID,
+    dept_type: DepartmentType,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Manually trigger an agent execution cycle for a department."""
+    await _verify_ownership(company_id, current_user, db)
+    result = await db.execute(
+        select(Department).where(
+            Department.company_id == company_id,
+            Department.type == dept_type,
+        )
+    )
+    department = result.scalar_one_or_none()
+    if department is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
+
+    from app.services.agent_scheduler import trigger_department_cycle
+
+    task_id = trigger_department_cycle(str(company_id), dept_type.value)
+    return {
+        "data": {"task_id": task_id, "department": dept_type.value, "status": "triggered"},
+        "error": None,
+        "meta": None,
+    }

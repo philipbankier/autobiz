@@ -1,21 +1,12 @@
 import { getToken } from "./auth";
-import type {
-  ApiResponse,
-  AuthResponse,
-  LoginRequest,
-  RegisterRequest,
-  Company,
-  CreateCompanyRequest,
-  Department,
-  UpdateDepartmentRequest,
-  AgentRun,
-  AgentTask,
-  CreateTaskRequest,
-  AgentMessage,
-  SendMessageRequest,
-} from "@/types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+export interface ApiResponse<T> {
+  data: T | null;
+  error: string | null;
+  meta: Record<string, unknown> | null;
+}
 
 async function fetchApi<T>(
   endpoint: string,
@@ -25,7 +16,6 @@ async function fetchApi<T>(
   const headers: HeadersInit = {
     "Content-Type": "application/json",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...((options.headers as Record<string, string>) || {}),
   };
 
   try {
@@ -34,17 +24,21 @@ async function fetchApi<T>(
       headers,
     });
 
+    const body = await response.json().catch(() => ({}));
+
     if (!response.ok) {
-      const errorBody = await response.json().catch(() => ({}));
       return {
         data: null,
-        error: errorBody.detail || errorBody.message || `HTTP ${response.status}`,
+        error: body.detail || body.error || `HTTP ${response.status}`,
         meta: null,
       };
     }
 
-    const data = await response.json();
-    return { data, error: null, meta: null };
+    // Backend wraps responses in {data, error, meta}
+    if (body.data !== undefined) {
+      return body as ApiResponse<T>;
+    }
+    return { data: body as T, error: null, meta: null };
   } catch (error) {
     return {
       data: null,
@@ -56,99 +50,191 @@ async function fetchApi<T>(
 
 // === Auth ===
 
-export async function login(req: LoginRequest): Promise<ApiResponse<AuthResponse>> {
-  return fetchApi<AuthResponse>("/auth/login", {
+export interface AuthResponse {
+  user: {
+    id: string;
+    email: string;
+    name: string;
+    credits_balance: string;
+  };
+  access_token: string;
+  token_type: string;
+}
+
+export async function login(email: string, password: string) {
+  return fetchApi<AuthResponse>("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify(req),
+    body: JSON.stringify({ email, password }),
   });
 }
 
-export async function register(req: RegisterRequest): Promise<ApiResponse<AuthResponse>> {
-  return fetchApi<AuthResponse>("/auth/register", {
+export async function register(email: string, password: string, name: string) {
+  return fetchApi<AuthResponse>("/api/auth/register", {
     method: "POST",
-    body: JSON.stringify(req),
+    body: JSON.stringify({ email, password, name }),
   });
+}
+
+export async function getMe() {
+  return fetchApi<{ id: string; email: string; name: string; credits_balance: string }>("/api/auth/me");
 }
 
 // === Companies ===
 
-export async function getCompanies(): Promise<ApiResponse<Company[]>> {
-  return fetchApi<Company[]>("/companies");
+export interface Company {
+  id: string;
+  user_id: string;
+  name: string;
+  mission: string;
+  slug: string;
+  status: string;
+  config: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
 }
 
-export async function getCompany(id: string): Promise<ApiResponse<Company>> {
-  return fetchApi<Company>(`/companies/${id}`);
+export async function getCompanies() {
+  return fetchApi<Company[]>("/api/companies");
 }
 
-export async function createCompany(req: CreateCompanyRequest): Promise<ApiResponse<Company>> {
-  return fetchApi<Company>("/companies", {
+export async function getCompany(id: string) {
+  return fetchApi<Company>(`/api/companies/${id}`);
+}
+
+export async function createCompany(name: string, mission: string, slug: string) {
+  return fetchApi<Company>("/api/companies", {
     method: "POST",
-    body: JSON.stringify(req),
+    body: JSON.stringify({ name, mission, slug }),
   });
+}
+
+// === Dashboard ===
+
+export interface DashboardData {
+  company_status: string;
+  departments: { type: string; status: string }[];
+  active_runs: number;
+  completed_runs: number;
+  task_stats: Record<string, number>;
+  total_cost: string;
+  credits_balance: string;
+}
+
+export async function getDashboard(companyId: string) {
+  return fetchApi<DashboardData>(`/api/companies/${companyId}/dashboard`);
 }
 
 // === Departments ===
 
-export async function getDepartments(companyId: string): Promise<ApiResponse<Department[]>> {
-  return fetchApi<Department[]>(`/companies/${companyId}/departments`);
+export interface Department {
+  id: string;
+  company_id: string;
+  type: string;
+  autonomy_level: string;
+  budget_cap_daily: string | null;
+  status: string;
+  agent_session_id: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
-export async function updateDepartment(
-  companyId: string,
-  departmentId: string,
-  req: UpdateDepartmentRequest
-): Promise<ApiResponse<Department>> {
-  return fetchApi<Department>(`/companies/${companyId}/departments/${departmentId}`, {
-    method: "PATCH",
-    body: JSON.stringify(req),
+export async function getDepartments(companyId: string) {
+  return fetchApi<Department[]>(`/api/companies/${companyId}/departments`);
+}
+
+export async function updateDepartment(companyId: string, deptType: string, data: { autonomy_level?: string; budget_cap_daily?: number | null }) {
+  return fetchApi<Department>(`/api/companies/${companyId}/departments/${deptType}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
   });
 }
 
-// === Agent Runs ===
+export async function triggerDepartment(companyId: string, deptType: string) {
+  return fetchApi<{ task_id: string; department: string; status: string }>(`/api/companies/${companyId}/departments/${deptType}/trigger`, {
+    method: "POST",
+  });
+}
 
-export async function getAgentRuns(companyId: string): Promise<ApiResponse<AgentRun[]>> {
-  return fetchApi<AgentRun[]>(`/companies/${companyId}/runs`);
+// === Activity ===
+
+export interface AgentRun {
+  id: string;
+  department_id: string;
+  company_id: string;
+  trigger: string;
+  status: string;
+  started_at: string;
+  completed_at: string | null;
+  tokens_used: number;
+  cost: string;
+  summary: string | null;
+}
+
+export async function getActivity(companyId: string, limit = 20, offset = 0) {
+  return fetchApi<AgentRun[]>(`/api/companies/${companyId}/activity?limit=${limit}&offset=${offset}`);
 }
 
 // === Tasks ===
 
-export async function getTasks(companyId: string): Promise<ApiResponse<AgentTask[]>> {
-  return fetchApi<AgentTask[]>(`/companies/${companyId}/tasks`);
+export interface AgentTask {
+  id: string;
+  company_id: string;
+  department_id: string | null;
+  title: string;
+  description: string;
+  status: string;
+  priority: string;
+  created_by: string;
+  assigned_department: string;
+  created_at: string;
+  completed_at: string | null;
 }
 
-export async function createTask(
-  companyId: string,
-  req: CreateTaskRequest
-): Promise<ApiResponse<AgentTask>> {
-  return fetchApi<AgentTask>(`/companies/${companyId}/tasks`, {
+export async function getTasks(companyId: string) {
+  return fetchApi<AgentTask[]>(`/api/companies/${companyId}/tasks`);
+}
+
+export async function createTask(companyId: string, data: { title: string; description: string; priority: string; assigned_department: string }) {
+  return fetchApi<AgentTask>(`/api/companies/${companyId}/tasks`, {
     method: "POST",
-    body: JSON.stringify(req),
-  });
-}
-
-export async function updateTaskStatus(
-  companyId: string,
-  taskId: string,
-  status: string
-): Promise<ApiResponse<AgentTask>> {
-  return fetchApi<AgentTask>(`/companies/${companyId}/tasks/${taskId}`, {
-    method: "PATCH",
-    body: JSON.stringify({ status }),
+    body: JSON.stringify(data),
   });
 }
 
 // === Chat ===
 
-export async function getMessages(companyId: string): Promise<ApiResponse<AgentMessage[]>> {
-  return fetchApi<AgentMessage[]>(`/companies/${companyId}/messages`);
+export interface AgentMessage {
+  id: string;
+  company_id: string;
+  department_id: string;
+  role: string;
+  content: string;
+  created_at: string;
 }
 
-export async function sendMessage(
-  companyId: string,
-  req: SendMessageRequest
-): Promise<ApiResponse<AgentMessage>> {
-  return fetchApi<AgentMessage>(`/companies/${companyId}/messages`, {
+export interface ChatResponse {
+  user_message: AgentMessage;
+  agent_message: AgentMessage;
+}
+
+export async function getChat(companyId: string, departmentType?: string) {
+  const params = departmentType ? `?department_type=${departmentType}` : "";
+  return fetchApi<AgentMessage[]>(`/api/companies/${companyId}/chat${params}`);
+}
+
+export async function sendChat(companyId: string, departmentType: string, content: string) {
+  return fetchApi<ChatResponse>(`/api/companies/${companyId}/chat`, {
     method: "POST",
-    body: JSON.stringify(req),
+    body: JSON.stringify({ department_type: departmentType, content }),
   });
+}
+
+// === Billing ===
+
+export async function getBalance() {
+  return fetchApi<{ credits_balance: string }>("/api/billing/balance");
+}
+
+export async function getUsage() {
+  return fetchApi<{ total_cost: string; breakdown: Record<string, string> }>("/api/billing/usage");
 }

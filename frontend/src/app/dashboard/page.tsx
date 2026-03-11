@@ -1,71 +1,72 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { getCompanies, type Company } from "@/lib/api";
+import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { CompanyCard } from "@/components/company/company-card";
-import { CompanyStatus } from "@/types";
-import type { Company } from "@/types";
-import { Plus } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
-const mockCompanies: Company[] = [
-  {
-    id: "comp-1",
-    name: "NexGen AI Solutions",
-    slug: "nexgen-ai-solutions",
-    mission:
-      "Provide cutting-edge AI consulting and automation solutions for mid-market businesses looking to scale operations.",
-    status: CompanyStatus.ACTIVE,
-    owner_id: "user-1",
-    created_at: "2026-02-15T00:00:00Z",
-    updated_at: "2026-03-11T00:00:00Z",
-  },
-  {
-    id: "comp-2",
-    name: "EcoTrack Analytics",
-    slug: "ecotrack-analytics",
-    mission:
-      "AI-powered environmental monitoring and sustainability reporting for enterprise companies.",
-    status: CompanyStatus.ACTIVE,
-    owner_id: "user-1",
-    created_at: "2026-03-01T00:00:00Z",
-    updated_at: "2026-03-10T00:00:00Z",
-  },
-  {
-    id: "comp-3",
-    name: "SwiftShip Logistics",
-    slug: "swiftship-logistics",
-    mission:
-      "Autonomous logistics optimization using AI to reduce delivery times and costs by 40%.",
-    status: CompanyStatus.PENDING,
-    owner_id: "user-1",
-    created_at: "2026-03-10T00:00:00Z",
-    updated_at: "2026-03-10T00:00:00Z",
-  },
-];
+const statusColors: Record<string, string> = {
+  planning: "bg-yellow-600",
+  building: "bg-blue-600",
+  running: "bg-green-600",
+  paused: "bg-gray-600",
+  archived: "bg-red-600",
+};
 
 export default function DashboardPage() {
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    getCompanies().then((res) => {
+      if (res.data) setCompanies(res.data);
+      setLoading(false);
+    });
+  }, []);
+
+  if (loading) {
+    return <p className="text-gray-400">Loading companies...</p>;
+  }
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-2xl font-bold">Your Companies</h1>
-          <p className="text-muted-foreground mt-1">
-            Manage your AI-powered businesses
-          </p>
-        </div>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold text-white">Your Companies</h1>
         <Link href="/dashboard/new">
-          <Button className="gap-2">
-            <Plus className="h-4 w-4" />
-            New Company
-          </Button>
+          <Button>+ New Company</Button>
         </Link>
       </div>
 
-      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        {mockCompanies.map((company) => (
-          <CompanyCard key={company.id} company={company} />
-        ))}
-      </div>
+      {companies.length === 0 ? (
+        <Card className="p-12 bg-gray-900 border-gray-800 text-center">
+          <p className="text-gray-400 mb-4">No companies yet. Launch your first autonomous business!</p>
+          <Link href="/dashboard/new">
+            <Button>Create Company</Button>
+          </Link>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {companies.map((company) => (
+            <Link key={company.id} href={`/dashboard/${company.id}`}>
+              <Card className="p-6 bg-gray-900 border-gray-800 hover:border-gray-700 transition-colors cursor-pointer">
+                <div className="flex items-start justify-between mb-2">
+                  <h2 className="text-lg font-semibold text-white">{company.name}</h2>
+                  <Badge className={statusColors[company.status] || "bg-gray-600"}>
+                    {company.status}
+                  </Badge>
+                </div>
+                <p className="text-gray-400 text-sm mb-3">{company.mission}</p>
+                <p className="text-gray-500 text-xs">
+                  {company.slug}.autobiz.app · Created{" "}
+                  {new Date(company.created_at).toLocaleDateString()}
+                </p>
+              </Card>
+            </Link>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

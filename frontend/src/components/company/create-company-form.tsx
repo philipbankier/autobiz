@@ -33,7 +33,7 @@ export function CreateCompanyForm() {
     setError("");
     setLoading(true);
 
-    const result = await createCompany({ name, slug, mission });
+    const result = await createCompany(name, mission, slug);
 
     if (result.error) {
       setError(result.error);

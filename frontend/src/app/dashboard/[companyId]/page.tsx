@@ -1,178 +1,84 @@
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+"use client";
+
+import { useEffect, useState } from "react";
+import { useParams } from "next/navigation";
+import { getCompany, getDashboard, type Company, type DashboardData } from "@/lib/api";
+import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import {
-  DollarSign,
-  TrendingUp,
-  ListTodo,
-  Bot,
-  Cpu,
-  Clock,
-} from "lucide-react";
 
-const metrics = [
-  {
-    label: "Total Revenue",
-    value: "$12,450",
-    change: "+12.5%",
-    icon: DollarSign,
-    trend: "up",
-  },
-  {
-    label: "AI Costs (MTD)",
-    value: "$342.18",
-    change: "+3.2%",
-    icon: TrendingUp,
-    trend: "up",
-  },
-  {
-    label: "Active Tasks",
-    value: "24",
-    change: "-2",
-    icon: ListTodo,
-    trend: "down",
-  },
-  {
-    label: "Active Departments",
-    value: "6",
-    change: "0",
-    icon: Bot,
-    trend: "neutral",
-  },
-];
+const deptIcons: Record<string, string> = {
+  ceo: "👔", developer: "💻", marketing: "📢", sales: "💰", finance: "📊", support: "🎧",
+};
 
-const recentActivity = [
-  {
-    dept: "Marketing",
-    action: "Published 3 blog posts",
-    time: "12 min ago",
-  },
-  {
-    dept: "Sales",
-    action: "Sent 15 outreach emails",
-    time: "28 min ago",
-  },
-  {
-    dept: "Support",
-    action: "Resolved 8 tickets",
-    time: "1 hr ago",
-  },
-  {
-    dept: "Research",
-    action: "Completed competitor analysis",
-    time: "2 hrs ago",
-  },
-  {
-    dept: "Product",
-    action: "Updated feature roadmap",
-    time: "3 hrs ago",
-  },
-];
+const statusColors: Record<string, string> = {
+  idle: "text-gray-400", running: "text-green-400", waiting: "text-yellow-400",
+};
 
 export default function CompanyOverviewPage() {
+  const params = useParams();
+  const companyId = params.companyId as string;
+  const [company, setCompany] = useState<Company | null>(null);
+  const [dashboard, setDashboard] = useState<DashboardData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([getCompany(companyId), getDashboard(companyId)]).then(([compRes, dashRes]) => {
+      if (compRes.data) setCompany(compRes.data);
+      if (dashRes.data) setDashboard(dashRes.data);
+      setLoading(false);
+    });
+  }, [companyId]);
+
+  if (loading) return <p className="text-gray-400">Loading...</p>;
+  if (!company || !dashboard) return <p className="text-red-400">Company not found</p>;
+
   return (
     <div className="space-y-6">
-      {/* Metrics */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {metrics.map((metric) => {
-          const Icon = metric.icon;
-          return (
-            <Card key={metric.label}>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  {metric.label}
-                </CardTitle>
-                <Icon className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{metric.value}</div>
-                <p
-                  className={`text-xs mt-1 ${
-                    metric.trend === "up"
-                      ? "text-emerald-500"
-                      : metric.trend === "down"
-                      ? "text-red-500"
-                      : "text-muted-foreground"
-                  }`}
-                >
-                  {metric.change} from last month
-                </p>
-              </CardContent>
-            </Card>
-          );
-        })}
+      {/* Header */}
+      <div>
+        <div className="flex items-center gap-3 mb-1">
+          <h1 className="text-2xl font-bold text-white">{company.name}</h1>
+          <Badge>{company.status}</Badge>
+        </div>
+        <p className="text-gray-400">{company.mission}</p>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* Recent Activity */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Clock className="h-4 w-4" />
-              Recent Activity
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {recentActivity.map((item, i) => (
-                <div
-                  key={i}
-                  className="flex items-center justify-between text-sm"
-                >
-                  <div className="flex items-center gap-3">
-                    <Badge variant="outline" className="text-xs w-24 justify-center">
-                      {item.dept}
-                    </Badge>
-                    <span>{item.action}</span>
-                  </div>
-                  <span className="text-xs text-muted-foreground whitespace-nowrap ml-4">
-                    {item.time}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </CardContent>
+      {/* Key Metrics */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Card className="p-4 bg-gray-900 border-gray-800">
+          <p className="text-gray-500 text-xs uppercase">Active Runs</p>
+          <p className="text-2xl font-bold text-white">{dashboard.active_runs}</p>
         </Card>
+        <Card className="p-4 bg-gray-900 border-gray-800">
+          <p className="text-gray-500 text-xs uppercase">Completed</p>
+          <p className="text-2xl font-bold text-white">{dashboard.completed_runs}</p>
+        </Card>
+        <Card className="p-4 bg-gray-900 border-gray-800">
+          <p className="text-gray-500 text-xs uppercase">Total Cost</p>
+          <p className="text-2xl font-bold text-white">${dashboard.total_cost}</p>
+        </Card>
+        <Card className="p-4 bg-gray-900 border-gray-800">
+          <p className="text-gray-500 text-xs uppercase">Credits</p>
+          <p className="text-2xl font-bold text-green-400">${dashboard.credits_balance}</p>
+        </Card>
+      </div>
 
-        {/* Department Status */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Cpu className="h-4 w-4" />
-              Department Status
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {[
-                { name: "Marketing", status: "active", tasks: 5, cost: "$45.20" },
-                { name: "Sales", status: "active", tasks: 8, cost: "$62.10" },
-                { name: "Customer Support", status: "active", tasks: 3, cost: "$89.50" },
-                { name: "Product", status: "active", tasks: 4, cost: "$31.00" },
-                { name: "Engineering", status: "paused", tasks: 2, cost: "$78.38" },
-                { name: "Research", status: "active", tasks: 2, cost: "$36.00" },
-              ].map((dept) => (
-                <div
-                  key={dept.name}
-                  className="flex items-center justify-between text-sm"
-                >
-                  <div className="flex items-center gap-3">
-                    <Badge
-                      variant={dept.status === "active" ? "success" : "warning"}
-                      className="text-xs w-16 justify-center"
-                    >
-                      {dept.status}
-                    </Badge>
-                    <span className="font-medium">{dept.name}</span>
-                  </div>
-                  <div className="flex items-center gap-4 text-muted-foreground">
-                    <span className="text-xs">{dept.tasks} tasks</span>
-                    <span className="text-xs w-16 text-right">{dept.cost}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+      {/* Department Status Grid */}
+      <div>
+        <h2 className="text-lg font-semibold text-white mb-3">Departments</h2>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          {dashboard.departments.map((dept) => (
+            <Card key={dept.type} className="p-4 bg-gray-900 border-gray-800">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-lg">{deptIcons[dept.type] || "🏢"}</span>
+                <span className="text-white font-medium capitalize">{dept.type}</span>
+              </div>
+              <span className={`text-sm ${statusColors[dept.status] || "text-gray-400"}`}>
+                ● {dept.status}
+              </span>
+            </Card>
+          ))}
+        </div>
       </div>
     </div>
   );
