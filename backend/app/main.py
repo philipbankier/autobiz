@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.routers import auth, companies, departments, activity, chat, tasks, billing, dashboard, knowledge
+from app.routers import auth, companies, departments, activity, chat, tasks, billing, dashboard, knowledge, site
 
 app = FastAPI(
     title="AutoBiz API",
@@ -29,6 +29,7 @@ app.include_router(tasks.router)
 app.include_router(billing.router)
 app.include_router(dashboard.router)
 app.include_router(knowledge.router)
+app.include_router(site.router)
 
 
 @app.exception_handler(Exception)
