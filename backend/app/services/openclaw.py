@@ -1,27 +1,43 @@
 """
-OpenClaw integration service.
-Spawns and manages agent sessions for company departments.
+OpenClaw Gateway integration service.
+Spawns agent sessions via the Gateway HTTP API (/tools/invoke).
+Agents get full OpenClaw capabilities: exec, file access, MCP tools, memory, web search, etc.
 """
 import json
 import logging
-import subprocess
 from pathlib import Path
 from typing import Optional
 
+import httpx
+
+from app.config import settings
+
 logger = logging.getLogger(__name__)
 
-OPENCLAW_BIN = "/home/philip/.nvm/versions/node/v22.19.0/bin/openclaw"
+GATEWAY_URL = "http://127.0.0.1:18789"
 COMPANIES_DIR = Path("/home/philip/TinkerLab/autobiz/companies")
 
-# Map AutoBiz department types to OpenClaw agent names
+# Map AutoBiz department types to OpenClaw agent IDs
 DEPT_TO_AGENT = {
     "ceo": "orchestrator",
     "developer": "developer",
     "marketing": "marketing",
-    "sales": "marketing",  # Sales shares marketing agent for now
-    "finance": "researcher",  # Finance uses researcher for analysis
-    "support": "main",  # Support uses main agent
+    "sales": "marketing",       # Shares marketing agent, sales-specific via task
+    "finance": "researcher",    # Uses researcher for analysis
+    "support": "coordinator",   # Uses coordinator for monitoring/support
 }
+
+
+def _get_gateway_token() -> str:
+    """Read gateway auth token from OpenClaw config."""
+    config_path = Path.home() / ".openclaw" / "openclaw.json"
+    try:
+        with open(config_path) as f:
+            config = json.load(f)
+        return config["gateway"]["auth"]["token"]
+    except (FileNotFoundError, KeyError) as e:
+        logger.error(f"Cannot read gateway token: {e}")
+        return settings.OPENCLAW_GATEWAY_TOKEN if hasattr(settings, 'OPENCLAW_GATEWAY_TOKEN') else ""
 
 
 def get_company_workspace(company_id: str, slug: str) -> Path:
@@ -29,232 +45,238 @@ def get_company_workspace(company_id: str, slug: str) -> Path:
     workspace = COMPANIES_DIR / slug
     workspace.mkdir(parents=True, exist_ok=True)
 
-    # Create knowledge graph file if not exists
-    kg_file = workspace / "knowledge-graph.jsonl"
+    # Ensure essential files exist
+    company_md = workspace / "COMPANY.md"
+    if not company_md.exists():
+        company_md.write_text(f"# Company: {slug}\nID: {company_id}\n\n## Mission\n(Not yet defined)\n\n## Current Stage\nPlanning\n")
+
+    memory_md = workspace / "MEMORY.md"
+    if not memory_md.exists():
+        memory_md.write_text(f"# {slug} — Agent Memory\n\n## Key Decisions\n\n## Lessons Learned\n\n## Important Context\n")
+
+    kg_dir = workspace / "knowledge"
+    kg_dir.mkdir(exist_ok=True)
+    kg_file = kg_dir / "graph.jsonl"
     if not kg_file.exists():
         kg_file.write_text("")
 
-    # Create COMPANY.md context file if not exists
-    company_md = workspace / "COMPANY.md"
-    if not company_md.exists():
-        company_md.write_text(f"# Company: {slug}\nID: {company_id}\n")
+    (workspace / "code").mkdir(exist_ok=True)
+    (workspace / "content").mkdir(exist_ok=True)
+    (workspace / "site").mkdir(exist_ok=True)
 
     return workspace
 
 
-def build_agent_prompt(
+def _build_task_prompt(
     company_name: str,
     company_mission: str,
     department_type: str,
     task_description: str,
-    knowledge_context: str = "",
     pending_tasks: list[dict] | None = None,
     chat_history: list[dict] | None = None,
 ) -> str:
-    """Build a contextual prompt for an agent session."""
-
+    """Build the task prompt for an agent session."""
+    
     tasks_section = ""
     if pending_tasks:
-        tasks_section = "\n## Pending Tasks\n"
+        tasks_section = "\n## Your Pending Tasks\n"
         for t in pending_tasks:
             tasks_section += f"- [{t['priority']}] {t['title']}: {t['description']}\n"
 
     chat_section = ""
     if chat_history:
-        chat_section = "\n## Recent Messages from Human Owner\n"
-        for msg in chat_history[-5:]:  # Last 5 messages
+        chat_section = "\n## Recent Messages from the Human Owner\n"
+        for msg in chat_history[-5:]:
             chat_section += f"- {msg['role']}: {msg['content']}\n"
 
-    kg_section = ""
-    if knowledge_context:
-        kg_section = f"\n## Knowledge Graph Context\n{knowledge_context}\n"
+    role_desc = _get_role_description(department_type)
 
-    prompt = f"""You are the {department_type.upper()} department of {company_name}.
+    return f"""You are the {department_type.upper()} department of "{company_name}".
 
 ## Company Mission
 {company_mission}
 
 ## Your Role
-You are the {department_type} agent. You operate autonomously to advance the company mission.
-{_get_role_instructions(department_type)}
-{tasks_section}{chat_section}{kg_section}
-## Instructions
-1. Review the current state of the company and your pending tasks.
-2. Execute the most impactful work you can right now.
-3. After completing work, write a brief summary of what you did.
-4. If you created any files, they should be in the company workspace.
-5. Update the knowledge graph with any new entities or decisions.
+{role_desc}
 
-## Current Task
+## Workspace
+You are working in the company workspace. Key files:
+- COMPANY.md — Company context and strategy (read this first, update if you make strategic decisions)
+- MEMORY.md — Persistent memory across runs (update with important learnings)
+- knowledge/graph.jsonl — Knowledge graph (append new entities as JSONL)
+- code/ — Product source code
+- content/ — Marketing content (blog posts, social media drafts)
+- site/ — Built/deployable website assets
+{tasks_section}{chat_section}
+## Your Task
 {task_description}
 
-When finished, output a JSON summary on the LAST line:
-{{"status": "completed", "summary": "what you did", "files_created": [], "files_modified": [], "entities_added": []}}
+## Instructions
+1. Read COMPANY.md first for context
+2. Execute your task using the tools available to you
+3. Update MEMORY.md with anything important you learned or decided
+4. If you create/modify files, note what you changed
+5. Be concise in your final summary
 """
-    return prompt
 
 
-def _get_role_instructions(department_type: str) -> str:
-    """Department-specific instructions."""
-    instructions = {
-        "ceo": """As CEO, you:
-- Review overall company progress and metrics
-- Create and prioritize tasks for other departments
-- Make strategic decisions about product direction
-- Ensure all departments are aligned with the mission""",
-
-        "developer": """As Developer, you:
-- Build and maintain the product (code, deploy, test)
-- Fix bugs and implement features from your task list
-- Write clean, production-ready code
-- Deploy to Vercel/Cloudflare when ready""",
-
-        "marketing": """As Marketing, you:
-- Create compelling content (blog posts, social media, threads)
-- Plan and execute marketing campaigns
-- Write copy for the website and landing pages
-- Research and engage target audience""",
-
-        "sales": """As Sales, you:
-- Optimize landing pages for conversion
-- Create lead magnets and signup flows
-- Analyze pricing strategy
-- Track and improve conversion metrics""",
-
-        "finance": """As Finance, you:
-- Track revenue, costs, and profitability
-- Create financial reports and projections
-- Monitor agent spending and ROI
-- Recommend budget adjustments""",
-
-        "support": """As Support, you:
-- Monitor and respond to customer inquiries
-- Categorize and prioritize issues
-- Create FAQ and help documentation
-- Escalate critical issues to CEO""",
+def _get_role_description(department_type: str) -> str:
+    """Department-specific role descriptions."""
+    roles = {
+        "ceo": """You are the CEO. You set strategic direction, review progress, create and prioritize tasks 
+for other departments, and make key business decisions. Update COMPANY.md with strategy changes.""",
+        
+        "developer": """You are the lead developer. You write production-quality code, build features, 
+fix bugs, run tests, and handle deployments. Work in the code/ directory. Use git for version control.
+Run builds with npm/node to verify your work compiles.""",
+        
+        "marketing": """You are the marketing director. You create compelling content (blog posts, social media 
+posts, email copy), plan campaigns, and track engagement. Save content drafts to content/. 
+Research competitors and trending topics.""",
+        
+        "sales": """You are the sales lead. You optimize conversion funnels, create landing page copy, 
+set up pricing, and track sales metrics. Focus on what drives signups and revenue.""",
+        
+        "finance": """You are the CFO. You track revenue, costs, and profitability. Create financial 
+reports and projections. Monitor agent spending and ROI. Recommend budget adjustments.""",
+        
+        "support": """You are the support lead. You monitor customer inquiries, create FAQ documentation, 
+triage issues, and ensure customer satisfaction. Document common issues and solutions.""",
     }
-    return instructions.get(department_type, "Execute your assigned tasks efficiently.")
+    return roles.get(department_type, "Execute your assigned tasks efficiently.")
 
 
-async def run_agent_session(
+async def spawn_agent_session(
     company_id: str,
     company_slug: str,
     company_name: str,
     company_mission: str,
     department_type: str,
     task_description: str,
-    knowledge_context: str = "",
     pending_tasks: list[dict] | None = None,
     chat_history: list[dict] | None = None,
+    timeout_seconds: int = 300,
+    model: str | None = None,
 ) -> dict:
     """
-    Run an agent session via OpenClaw CLI.
-    Returns the agent's response and any artifacts.
+    Spawn an OpenClaw agent session via the Gateway HTTP API.
+    Returns immediately with session info. Results come async via announce.
     """
     workspace = get_company_workspace(company_id, company_slug)
-    agent_name = DEPT_TO_AGENT.get(department_type, "main")
+    agent_id = DEPT_TO_AGENT.get(department_type, "coordinator")
+    token = _get_gateway_token()
 
-    prompt = build_agent_prompt(
+    if not token:
+        return {"status": "error", "message": "No gateway token configured"}
+
+    task_prompt = _build_task_prompt(
         company_name=company_name,
         company_mission=company_mission,
         department_type=department_type,
         task_description=task_description,
-        knowledge_context=knowledge_context,
         pending_tasks=pending_tasks,
         chat_history=chat_history,
     )
 
-    logger.info(f"Running {department_type} agent for {company_slug} (agent: {agent_name})")
+    spawn_args: dict = {
+        "agentId": agent_id,
+        "task": task_prompt,
+        "cwd": str(workspace),
+        "mode": "run",
+        "runTimeoutSeconds": timeout_seconds,
+    }
+    if model:
+        spawn_args["model"] = model
+
+    logger.info(f"Spawning {department_type} agent (openclaw:{agent_id}) for {company_slug}")
 
     try:
-        # Use claude CLI directly with the agent's context
-        result = subprocess.run(
-            [
-                "claude",
-                "--permission-mode", "bypassPermissions",
-                "--print",
-                prompt,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=300,  # 5 min max per agent run
-            cwd=str(workspace),
-            env={
-                "PATH": "/home/philip/.nvm/versions/node/v22.19.0/bin:/usr/local/bin:/usr/bin:/bin",
-                "HOME": "/home/philip",
-            },
-        )
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{GATEWAY_URL}/tools/invoke",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "tool": "sessions_spawn",
+                    "args": spawn_args,
+                },
+                timeout=30.0,  # Just the spawn request, not the run
+            )
+            
+            result = response.json()
 
-        output = result.stdout.strip()
-        stderr = result.stderr.strip()
+            if not result.get("ok"):
+                error = result.get("error", {})
+                logger.error(f"Gateway spawn failed: {error}")
+                return {
+                    "status": "error",
+                    "message": error.get("message", str(error)),
+                }
 
-        if result.returncode != 0:
-            logger.error(f"Agent failed: {stderr}")
+            details = result.get("result", {}).get("details", {})
             return {
-                "status": "failed",
-                "summary": f"Agent error: {stderr[:500]}",
-                "output": output[:2000],
-                "tokens_used": 0,
-                "cost": 0,
+                "status": "accepted",
+                "session_key": details.get("childSessionKey"),
+                "run_id": details.get("runId"),
+                "agent_id": agent_id,
+                "department": department_type,
+                "company_slug": company_slug,
             }
 
-        # Try to parse the JSON summary from the last line
-        summary = _extract_summary(output)
-
-        return {
-            "status": summary.get("status", "completed"),
-            "summary": summary.get("summary", output[-500:] if len(output) > 500 else output),
-            "output": output,
-            "files_created": summary.get("files_created", []),
-            "files_modified": summary.get("files_modified", []),
-            "entities_added": summary.get("entities_added", []),
-            "tokens_used": _estimate_tokens(prompt, output),
-            "cost": _estimate_cost(prompt, output),
-        }
-
-    except subprocess.TimeoutExpired:
-        logger.error(f"Agent timed out for {department_type}/{company_slug}")
-        return {
-            "status": "failed",
-            "summary": "Agent timed out after 5 minutes",
-            "output": "",
-            "tokens_used": 0,
-            "cost": 0,
-        }
+    except httpx.TimeoutException:
+        logger.error(f"Gateway timeout for {department_type}/{company_slug}")
+        return {"status": "error", "message": "Gateway request timed out"}
     except Exception as e:
-        logger.error(f"Agent exception: {e}")
-        return {
-            "status": "failed",
-            "summary": f"Agent exception: {str(e)[:500]}",
-            "output": "",
-            "tokens_used": 0,
-            "cost": 0,
-        }
+        logger.error(f"Gateway error: {e}")
+        return {"status": "error", "message": str(e)}
 
 
-def _extract_summary(output: str) -> dict:
-    """Try to extract JSON summary from agent output."""
-    # Look for JSON on the last few lines
-    lines = output.strip().split("\n")
-    for line in reversed(lines[-10:]):
-        line = line.strip()
-        if line.startswith("{") and line.endswith("}"):
-            try:
-                return json.loads(line)
-            except json.JSONDecodeError:
-                continue
-    return {}
+async def send_to_session(session_key: str, message: str) -> dict:
+    """Send a message to an existing agent session."""
+    token = _get_gateway_token()
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{GATEWAY_URL}/tools/invoke",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "tool": "sessions_send",
+                    "args": {
+                        "sessionKey": session_key,
+                        "message": message,
+                    },
+                },
+                timeout=30.0,
+            )
+            return response.json()
+    except Exception as e:
+        return {"ok": False, "error": {"message": str(e)}}
 
 
-def _estimate_tokens(prompt: str, output: str) -> int:
-    """Rough token estimate (4 chars per token)."""
-    return (len(prompt) + len(output)) // 4
+async def list_active_sessions() -> dict:
+    """List active agent sessions from the gateway."""
+    token = _get_gateway_token()
 
-
-def _estimate_cost(prompt: str, output: str) -> float:
-    """Rough cost estimate based on Claude Sonnet pricing."""
-    input_tokens = len(prompt) // 4
-    output_tokens = len(output) // 4
-    # Sonnet: $3/M input, $15/M output
-    cost = (input_tokens * 3 + output_tokens * 15) / 1_000_000
-    return round(cost, 4)
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{GATEWAY_URL}/tools/invoke",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "tool": "sessions_list",
+                    "args": {"limit": 20, "kinds": ["subagent"]},
+                },
+                timeout=10.0,
+            )
+            return response.json()
+    except Exception as e:
+        return {"ok": False, "error": {"message": str(e)}}
