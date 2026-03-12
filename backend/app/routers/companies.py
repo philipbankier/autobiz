@@ -35,10 +35,22 @@ async def create(
     current_user: User = Depends(get_current_user),
 ):
     company = await create_company(db, current_user.id, data)
+    await db.commit()
+
+    # Provision real infrastructure (async, best-effort)
+    from app.services.provisioning import provision_company
+    provision_result = await provision_company(
+        company_id=str(company.id),
+        slug=company.slug,
+        name=company.name,
+        mission=company.mission or "",
+    )
+
+    company_data = CompanyRead.model_validate(company).model_dump(mode="json")
     return {
-        "data": CompanyRead.model_validate(company).model_dump(mode="json"),
+        "data": company_data,
         "error": None,
-        "meta": None,
+        "meta": {"provisioning": provision_result},
     }
 
 
