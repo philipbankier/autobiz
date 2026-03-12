@@ -1,43 +1,39 @@
 """
-Agent lifecycle tasks — spawns OpenClaw agent sessions via Gateway API.
-Each agent gets full OpenClaw capabilities: exec, file access, MCP tools, memory, web search, etc.
+Celery tasks for agent department cycles.
+Implements:
+- Budget check before every run
+- Model tiering per department
+- Ralph loop task execution (one task per run)
+- Post-run memory consolidation (async)
 """
 import asyncio
 import logging
+import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from uuid import uuid4
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
-from app.models.agent_run import AgentRun, RunTrigger, RunStatus
-from app.models.agent_task import AgentTask, TaskStatus
-from app.models.agent_message import AgentMessage, MessageRole
-from app.models.company import Company
-from app.models.department import Department, DepartmentType
-from app.models.cost_event import CostEvent, CostType
-from app.models.user import User
-from app.services.openclaw import spawn_agent_session
 from app.worker import celery_app
+from app.database import async_session_factory
+from app.models.agent_run import AgentRun, RunStatus
+from app.models.company import Company
+from app.models.department import Department, DepartmentType, DepartmentStatus
+from app.models.cost_event import CostType
+from app.services.openclaw import spawn_agent_session
+from app.services.cost_control import (
+    check_budget,
+    record_cost,
+    estimate_cost,
+    get_model_for_department,
+)
 
 logger = logging.getLogger(__name__)
 
-_engine = None
-_session_factory = None
-
-
-def _get_session_factory():
-    global _engine, _session_factory
-    if _engine is None:
-        _engine = create_async_engine(settings.DATABASE_URL)
-        _session_factory = async_sessionmaker(_engine, expire_on_commit=False)
-    return _session_factory
-
 
 def _run_async(coro):
-    """Run async code from sync Celery task."""
+    """Helper to run async code in sync Celery tasks."""
     loop = asyncio.new_event_loop()
     try:
         return loop.run_until_complete(coro)
@@ -45,224 +41,234 @@ def _run_async(coro):
         loop.close()
 
 
-async def _get_company_context(db, company_id: str) -> dict | None:
-    """Fetch company + pending tasks + recent chat for agent context."""
-    company = await db.get(Company, company_id)
-    if not company:
-        return None
-
-    user = await db.get(User, company.user_id)
-
-    # Get pending tasks
-    result = await db.execute(
-        select(AgentTask).where(
-            AgentTask.company_id == company_id,
-            AgentTask.status.in_([TaskStatus.todo, TaskStatus.in_progress]),
-        ).order_by(AgentTask.priority.desc()).limit(20)
-    )
-    tasks = [
-        {"title": t.title, "description": t.description or "", "priority": t.priority.value,
-         "department": t.assigned_department.value if t.assigned_department else "unassigned"}
-        for t in result.scalars().all()
-    ]
-
-    # Get recent chat
-    result = await db.execute(
-        select(AgentMessage).where(
-            AgentMessage.company_id == company_id,
-        ).order_by(AgentMessage.created_at.desc()).limit(10)
-    )
-    chat = [
-        {"role": m.role.value, "content": m.content}
-        for m in reversed(list(result.scalars().all()))
-    ]
-
-    return {
-        "company": company,
-        "user": user,
-        "pending_tasks": tasks,
-        "chat_history": chat,
-    }
-
-
-async def _spawn_department(
+async def _execute_department_cycle(
     company_id: str,
     department_type: str,
-    task_description: str,
-    trigger: RunTrigger = RunTrigger.scheduled,
+    task_override: str | None = None,
 ) -> dict:
-    """Spawn an OpenClaw agent session for a department."""
-    session_factory = _get_session_factory()
-
-    async with session_factory() as db:
-        ctx = await _get_company_context(db, company_id)
-        if not ctx:
+    """Core logic for running a department agent cycle."""
+    async with async_session_factory() as db:
+        # Load company and department
+        company = await db.get(Company, uuid.UUID(company_id))
+        if not company:
             return {"status": "error", "message": f"Company {company_id} not found"}
 
-        company = ctx["company"]
-        user = ctx["user"]
-
-        # Credits check
-        if user and user.credits_balance <= 0:
-            return {"status": "error", "message": "Insufficient credits"}
-
-        # Get department
         result = await db.execute(
             select(Department).where(
-                Department.company_id == company_id,
-                Department.type == department_type,
+                Department.company_id == company.id,
+                Department.type == DepartmentType(department_type),
             )
         )
         department = result.scalar_one_or_none()
         if not department:
             return {"status": "error", "message": f"Department {department_type} not found"}
 
-        # Create agent run record
-        run = AgentRun(
-            id=uuid4(),
-            department_id=department.id,
-            company_id=company.id,
-            trigger=trigger,
-            status=RunStatus.running,
-            started_at=datetime.now(timezone.utc),
-        )
-        db.add(run)
-        department.status = "running"
-        await db.commit()
-
-        # Filter tasks for this department
-        dept_tasks = [
-            t for t in ctx["pending_tasks"]
-            if t["department"] == department_type or department_type == "ceo"
-        ]
-
-    # Spawn via OpenClaw Gateway
-    spawn_result = await spawn_agent_session(
-        company_id=str(company_id),
-        company_slug=company.slug,
-        company_name=company.name,
-        company_mission=company.mission,
-        department_type=department_type,
-        task_description=task_description,
-        pending_tasks=dept_tasks,
-        chat_history=ctx["chat_history"],
-    )
-
-    # Update run with spawn result
-    async with session_factory() as db:
-        run_record = await db.get(AgentRun, run.id)
-        if run_record:
-            if spawn_result.get("status") == "accepted":
-                run_record.summary = f"Agent spawned: session={spawn_result.get('session_key', '?')}"
-                # Agent is now running async — status stays "running"
-                # Results will come back via announce or polling
-            else:
-                run_record.status = RunStatus.failed
-                run_record.completed_at = datetime.now(timezone.utc)
-                run_record.summary = spawn_result.get("message", "Spawn failed")
-
-        # Reset department status if spawn failed
-        if spawn_result.get("status") != "accepted":
-            result = await db.execute(
-                select(Department).where(
-                    Department.company_id == company_id,
-                    Department.type == department_type,
-                )
+        # 1. BUDGET CHECK
+        budget_status = await check_budget(db, department)
+        if not budget_status["allowed"]:
+            logger.warning(
+                f"[{company.slug}/{department_type}] Budget exceeded: "
+                f"${budget_status['spend']:.2f}/${budget_status['budget']:.2f}"
             )
-            dept = result.scalar_one_or_none()
-            if dept:
-                dept.status = "idle"
+            return {
+                "status": "budget_exceeded",
+                "spend": str(budget_status["spend"]),
+                "budget": str(budget_status["budget"]),
+            }
 
+        if budget_status["warning"]:
+            logger.info(f"[{company.slug}/{department_type}] {budget_status['warning']}")
+
+        # 2. CREATE AGENT RUN RECORD
+        agent_run = AgentRun(
+            company_id=company.id,
+            department_id=department.id,
+            status=RunStatus.running,
+        )
+        db.add(agent_run)
+
+        # Mark department as running
+        department.status = DepartmentStatus.running
+        await db.flush()
         await db.commit()
 
-    logger.info(f"Spawn result for {department_type}/{company.slug}: {spawn_result.get('status')}")
-    return spawn_result
+        # 3. BUILD TASK DESCRIPTION
+        task = task_override or (
+            f"Check your PLAN.md for the next unchecked task and execute it. "
+            f"If no tasks exist, review COMPANY.md and create an initial plan "
+            f"in departments/{department_type}/PLAN.md."
+        )
+
+        # 4. SPAWN AGENT (with model tiering)
+        model = get_model_for_department(department_type)
+        
+        try:
+            spawn_result = await spawn_agent_session(
+                company_id=str(company.id),
+                company_slug=company.slug,
+                company_name=company.name,
+                company_mission=company.mission or "",
+                department_type=department_type,
+                task_description=task,
+                model=model,
+                timeout_seconds=300,
+            )
+        except Exception as e:
+            logger.error(f"[{company.slug}/{department_type}] Spawn failed: {e}")
+            spawn_result = {"status": "error", "message": str(e)}
+
+        # 5. UPDATE RUN STATUS
+        async with async_session_factory() as db2:
+            run = await db2.get(AgentRun, agent_run.id)
+            dept = await db2.get(Department, department.id)
+
+            if spawn_result.get("status") == "accepted":
+                run.status = RunStatus.completed
+                if dept:
+                    dept.agent_session_id = spawn_result.get("session_key")
+                    dept.status = DepartmentStatus.idle
+
+                # 6. RECORD ESTIMATED COST
+                # Estimate ~5K input + ~2K output tokens per run
+                estimated_cost = estimate_cost(model, 5000, 2000)
+                await record_cost(
+                    db2,
+                    company_id=company.id,
+                    department_id=department.id,
+                    cost_type=CostType.llm_tokens,
+                    amount=estimated_cost,
+                    description=f"{department_type} cycle run (estimated)",
+                )
+            else:
+                run.status = RunStatus.failed
+                run.error = spawn_result.get("message", "Unknown error")
+                if dept:
+                    dept.status = DepartmentStatus.idle
+
+            await db2.commit()
+
+        return {
+            "status": spawn_result.get("status"),
+            "department": department_type,
+            "company": company.slug,
+            "model": model,
+            "budget": {
+                "spend": str(budget_status["spend"]),
+                "budget": str(budget_status["budget"]),
+                "pct": budget_status["pct"],
+            },
+            **spawn_result,
+        }
+
+
+@celery_app.task(name="run_department_execution_cycle")
+def run_department_execution_cycle(company_id: str, department_type: str, task: str | None = None):
+    """Celery task: Execute a single department cycle."""
+    return _run_async(_execute_department_cycle(company_id, department_type, task))
 
 
 @celery_app.task(name="run_ceo_planning_cycle")
 def run_ceo_planning_cycle(company_id: str):
-    """CEO reviews goals, creates/assigns tasks. Runs daily."""
-    logger.info(f"CEO planning cycle for company {company_id}")
-    return _run_async(
-        _spawn_department(
-            company_id, "ceo",
-            """Review the company's current state by reading COMPANY.md and MEMORY.md.
-Then:
-1. Assess progress toward the mission
-2. Identify the highest-priority work needed right now
-3. Create task files in the workspace for other departments
-4. Update COMPANY.md with any strategic adjustments
-5. Update MEMORY.md with your observations""",
-            trigger=RunTrigger.scheduled,
-        )
-    )
-
-
-@celery_app.task(name="run_department_execution_cycle")
-def run_department_execution_cycle(company_id: str, department_type: str):
-    """Department agent wakes up, checks tasks, executes."""
-    logger.info(f"{department_type} execution cycle for company {company_id}")
-    return _run_async(
-        _spawn_department(
-            company_id, department_type,
-            f"""Check your pending tasks and execute the highest priority one.
-Read COMPANY.md for current context and MEMORY.md for your past work.
-If no tasks are assigned to you, look for ways to advance the company mission.
-Update MEMORY.md with what you accomplished.""",
-            trigger=RunTrigger.scheduled,
-        )
-    )
+    """
+    CEO planning cycle — runs with Opus model.
+    Creates/updates strategic plan and assigns tasks to departments.
+    """
+    return _run_async(_execute_department_cycle(
+        company_id,
+        "ceo",
+        task_override=(
+            "Review the company's current state in COMPANY.md and all department PLAN.md files. "
+            "Then:\n"
+            "1. Update COMPANY.md with any strategic changes\n"
+            "2. Review each department's progress (check completed vs pending tasks)\n"
+            "3. Add new tasks to department PLAN.md files as needed\n"
+            "4. Prioritize: what's the single most important thing for each department today?\n"
+            "5. Update your own departments/ceo/PLAN.md with your strategic tasks"
+        ),
+    ))
 
 
 @celery_app.task(name="run_finance_reporting_cycle")
 def run_finance_reporting_cycle(company_id: str):
-    """Finance agent compiles metrics."""
-    logger.info(f"Finance reporting cycle for company {company_id}")
-    return _run_async(
-        _spawn_department(
-            company_id, "finance",
-            """Compile a daily financial report:
-- Read any cost/revenue data available in the workspace
-- Summarize total agent costs, revenue (if any), and profit
-- Update knowledge/graph.jsonl with today's metrics
-- Write a brief report to content/finance-report.md
-- Update MEMORY.md with financial observations""",
-            trigger=RunTrigger.scheduled,
-        )
-    )
+    """Finance reporting cycle — runs daily."""
+    return _run_async(_execute_department_cycle(
+        company_id,
+        "finance",
+        task_override=(
+            "Generate a daily financial summary:\n"
+            "1. Check agent spending records in your memory\n"
+            "2. Check Stripe for any revenue (if configured)\n"
+            "3. Calculate burn rate and runway\n"
+            "4. Update departments/finance/PLAN.md with any action items\n"
+            "5. Write a brief report to COMPANY.md under ## Latest Financial Report"
+        ),
+    ))
 
 
 @celery_app.task(name="run_weekly_learning_cycle")
 def run_weekly_learning_cycle(company_id: str):
-    """Weekly retrospective."""
-    logger.info(f"Weekly learning cycle for company {company_id}")
-    return _run_async(
-        _spawn_department(
-            company_id, "ceo",
-            """Weekly retrospective:
-1. Read COMPANY.md and MEMORY.md
-2. What worked well this week?
-3. What failed or underperformed?
-4. What should we do differently next week?
-5. Update MEMORY.md with lessons learned
-6. Update COMPANY.md with revised strategy if needed""",
-            trigger=RunTrigger.scheduled,
-        )
-    )
+    """Weekly learning cycle — all departments reflect and consolidate."""
+    results = []
+    for dept in ["ceo", "developer", "marketing", "finance"]:
+        result = _run_async(_execute_department_cycle(
+            company_id,
+            dept,
+            task_override=(
+                "Weekly reflection:\n"
+                "1. Review your department's MEMORY.md\n"
+                "2. What worked well this week? What didn't?\n"
+                "3. What should we change for next week?\n"
+                "4. Update MEMORY.md with lessons learned\n"
+                "5. Suggest improvements to COMPANY.md strategy"
+            ),
+        ))
+        results.append({dept: result})
+    return results
 
 
 @celery_app.task(name="run_chat_response")
-def run_chat_response(company_id: str, department_type: str, user_message: str):
-    """Handle a chat message from the human owner."""
-    logger.info(f"Chat response for {department_type} in company {company_id}")
-    return _run_async(
-        _spawn_department(
-            company_id, department_type,
-            f"""The human owner sent you a message. Read it, respond helpfully, and take action if requested.
+def run_chat_response(company_id: str, department_type: str, message: str):
+    """Handle a chat message from the user — route to appropriate department."""
+    return _run_async(_execute_department_cycle(
+        company_id,
+        department_type,
+        task_override=f"The human owner sent this message. Respond and take action:\n\n{message}",
+    ))
 
-Human message: {user_message}
 
-After taking action, update MEMORY.md with any important context from this interaction.""",
-            trigger=RunTrigger.manual,
-        )
-    )
+@celery_app.task(name="run_onboarding")
+def run_onboarding(company_id: str, business_idea: str):
+    """
+    CEO onboarding — the user described their business idea.
+    CEO agent ralph-loops on it to create a full business plan.
+    """
+    return _run_async(_execute_department_cycle(
+        company_id,
+        "ceo",
+        task_override=f"""The human owner just created this company with the following business idea:
+
+"{business_idea}"
+
+Your job is to turn this into a real business plan. Do the following:
+
+1. **Research**: Think about the market, competitors, and target audience
+2. **Strategy**: Define the business model, pricing, and go-to-market approach
+3. **Update COMPANY.md** with:
+   - Refined mission statement
+   - Target audience description
+   - Business model
+   - Revenue strategy
+   - Competitive advantages
+   - Key metrics to track
+4. **Create initial PLAN.md for each department**:
+   - departments/developer/PLAN.md — product MVP tasks (checkboxes)
+   - departments/marketing/PLAN.md — launch marketing tasks
+   - departments/sales/PLAN.md — sales funnel tasks
+   - departments/finance/PLAN.md — financial setup tasks
+   - departments/support/PLAN.md — customer support setup
+5. **Update your own plan** in departments/ceo/PLAN.md
+
+Make the plans specific and actionable. Each task should be small enough for one agent run.
+Think like a founder — what's the fastest path to first paying customer?
+""",
+    ))

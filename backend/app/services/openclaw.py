@@ -1,7 +1,13 @@
 """
 OpenClaw Gateway integration service.
 Spawns agent sessions via the Gateway HTTP API (/tools/invoke).
-Agents get full OpenClaw capabilities: exec, file access, MCP tools, memory, web search, etc.
+
+Implements:
+- Ralph loop pattern (fresh context per iteration, PLAN.md-driven)
+- Budget enforcement (check before run, kill on exceed)
+- Model tiering (Opus for CEO, Sonnet for execution, Haiku for judging)
+- STEERING.md human override support
+- Post-run memory consolidation
 """
 import json
 import logging
@@ -11,6 +17,10 @@ from typing import Optional
 import httpx
 
 from app.config import settings
+from app.services.cost_control import (
+    get_model_for_department,
+    JUDGE_MODEL,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,34 +47,115 @@ def _get_gateway_token() -> str:
         return config["gateway"]["auth"]["token"]
     except (FileNotFoundError, KeyError) as e:
         logger.error(f"Cannot read gateway token: {e}")
-        return settings.OPENCLAW_GATEWAY_TOKEN if hasattr(settings, 'OPENCLAW_GATEWAY_TOKEN') else ""
+        return ""
 
 
 def get_company_workspace(company_id: str, slug: str) -> Path:
-    """Get or create workspace directory for a company."""
-    workspace = COMPANIES_DIR / slug
-    workspace.mkdir(parents=True, exist_ok=True)
+    """Get workspace directory for a company."""
+    return COMPANIES_DIR / slug
 
-    # Ensure essential files exist
-    company_md = workspace / "COMPANY.md"
-    if not company_md.exists():
-        company_md.write_text(f"# Company: {slug}\nID: {company_id}\n\n## Mission\n(Not yet defined)\n\n## Current Stage\nPlanning\n")
 
-    memory_md = workspace / "MEMORY.md"
-    if not memory_md.exists():
-        memory_md.write_text(f"# {slug} — Agent Memory\n\n## Key Decisions\n\n## Lessons Learned\n\n## Important Context\n")
+def _read_file_safe(path: Path, max_chars: int = 2000) -> str:
+    """Read a file safely, returning empty string if missing."""
+    try:
+        text = path.read_text()
+        return text[:max_chars] if len(text) > max_chars else text
+    except FileNotFoundError:
+        return ""
 
-    kg_dir = workspace / "knowledge"
-    kg_dir.mkdir(exist_ok=True)
-    kg_file = kg_dir / "graph.jsonl"
-    if not kg_file.exists():
-        kg_file.write_text("")
 
-    (workspace / "code").mkdir(exist_ok=True)
-    (workspace / "content").mkdir(exist_ok=True)
-    (workspace / "site").mkdir(exist_ok=True)
+def _get_steering(workspace: Path) -> str:
+    """Read STEERING.md for human overrides."""
+    content = _read_file_safe(workspace / "STEERING.md")
+    if not content or "No overrides" in content:
+        return ""
+    return f"\n## Human Steering (PRIORITY — follow these instructions)\n{content}\n"
 
-    return workspace
+
+def _get_department_plan(workspace: Path, department_type: str) -> str:
+    """Read the department's PLAN.md for current tasks."""
+    plan_path = workspace / "departments" / department_type / "PLAN.md"
+    content = _read_file_safe(plan_path, max_chars=3000)
+    if not content:
+        return ""
+    return f"\n## Your Current Plan\n{content}\n"
+
+
+def _get_department_memory(workspace: Path, department_type: str) -> str:
+    """Read the department's memory file."""
+    memory_path = workspace / "departments" / department_type / "MEMORY.md"
+    content = _read_file_safe(memory_path, max_chars=2000)
+    if not content:
+        return ""
+    return f"\n## Your Memory (from previous runs)\n{content}\n"
+
+
+def _get_role_description(department_type: str) -> str:
+    """Department-specific role descriptions with ralph loop instructions."""
+    roles = {
+        "ceo": """You are the CEO. You set strategic direction, review progress, create and prioritize tasks 
+for other departments, and make key business decisions.
+
+Your primary output is updating:
+- COMPANY.md — with strategy, business model, target audience
+- departments/*/PLAN.md — with specific tasks for each department (use checkbox format: - [ ] task)
+- Your own departments/ceo/PLAN.md — with your strategic tasks
+
+When creating tasks for departments, use this format in their PLAN.md:
+- [ ] Task title: Detailed description of what to do and what success looks like
+""",
+        
+        "developer": """You are the lead developer. You write production-quality code, build features, 
+fix bugs, run tests, and handle deployments. Work in the code/ directory.
+
+Ralph Loop Rules:
+1. Read departments/developer/PLAN.md to find the next unchecked task (- [ ])
+2. Execute ONLY that one task
+3. Validate your work (run tests, check for errors)
+4. If valid: mark it done (- [x]) and git commit
+5. Update departments/developer/MEMORY.md with what you learned
+6. DO NOT work on multiple tasks in one run
+""",
+        
+        "marketing": """You are the marketing director. You create compelling content (blog posts, social media 
+posts, email copy), plan campaigns, and track engagement.
+
+Ralph Loop Rules:
+1. Read departments/marketing/PLAN.md to find the next unchecked task
+2. Execute ONLY that one task
+3. Save content drafts to content/
+4. Mark task done and update your memory
+5. DO NOT work on multiple tasks in one run
+""",
+        
+        "sales": """You are the sales lead. You optimize conversion funnels, create landing page copy, 
+set up pricing, and track sales metrics.
+
+Ralph Loop Rules:
+1. Read departments/sales/PLAN.md to find the next unchecked task
+2. Execute ONLY that one task
+3. Mark task done and update your memory
+""",
+        
+        "finance": """You are the CFO. You track revenue, costs, and profitability. Create financial 
+reports and projections. Monitor agent spending and ROI.
+
+Ralph Loop Rules:
+1. Read departments/finance/PLAN.md to find the next unchecked task
+2. Execute ONLY that one task
+3. Mark task done and update your memory
+""",
+        
+        "support": """You are the support lead. You monitor customer inquiries, create FAQ documentation, 
+triage issues, and ensure customer satisfaction.
+
+Ralph Loop Rules:
+1. Read departments/support/PLAN.md to find the next unchecked task
+2. Execute ONLY that one task
+3. Mark task done and update your memory
+""",
+    }
+    return roles.get(department_type, "Execute your assigned tasks efficiently.")
 
 
 def _build_task_prompt(
@@ -72,14 +163,26 @@ def _build_task_prompt(
     company_mission: str,
     department_type: str,
     task_description: str,
+    workspace: Path,
     pending_tasks: list[dict] | None = None,
     chat_history: list[dict] | None = None,
 ) -> str:
-    """Build the task prompt for an agent session."""
+    """Build the task prompt for an agent session with ralph loop structure."""
     
+    # Read company context
+    company_context = _read_file_safe(workspace / "COMPANY.md", max_chars=2000)
+    
+    # Read human steering overrides
+    steering = _get_steering(workspace)
+    
+    # Read department plan and memory
+    plan = _get_department_plan(workspace, department_type)
+    memory = _get_department_memory(workspace, department_type)
+
+    # Legacy pending tasks (from DB)
     tasks_section = ""
     if pending_tasks:
-        tasks_section = "\n## Your Pending Tasks\n"
+        tasks_section = "\n## Additional Pending Tasks (from queue)\n"
         for t in pending_tasks:
             tasks_section += f"- [{t['priority']}] {t['title']}: {t['description']}\n"
 
@@ -91,6 +194,8 @@ def _build_task_prompt(
 
     role_desc = _get_role_description(department_type)
 
+    abs_workspace = str(workspace.resolve())
+
     return f"""You are the {department_type.upper()} department of "{company_name}".
 
 ## Company Mission
@@ -98,52 +203,37 @@ def _build_task_prompt(
 
 ## Your Role
 {role_desc}
+{steering}
+## Company Context
+{company_context}
+{plan}{memory}
+## IMPORTANT: Company Workspace Location
+All company files are at: {abs_workspace}
+You MUST read and write files using this absolute path. Do NOT create files in your default workspace.
 
-## Workspace
-You are working in the company workspace. Key files:
-- COMPANY.md — Company context and strategy (read this first, update if you make strategic decisions)
-- MEMORY.md — Persistent memory across runs (update with important learnings)
-- knowledge/graph.jsonl — Knowledge graph (append new entities as JSONL)
-- code/ — Product source code
-- content/ — Marketing content (blog posts, social media drafts)
-- site/ — Built/deployable website assets
+Key files (use absolute paths):
+- {abs_workspace}/COMPANY.md — Company strategy (read first, CEO updates this)
+- {abs_workspace}/STEERING.md — Human overrides (check for instructions)
+- {abs_workspace}/departments/{department_type}/PLAN.md — Your task list
+- {abs_workspace}/departments/{department_type}/MEMORY.md — Your persistent memory
+- {abs_workspace}/knowledge/graph.jsonl — Knowledge graph
+- {abs_workspace}/code/ — Product source code
+- {abs_workspace}/content/ — Marketing content
+- {abs_workspace}/site/ — Website assets
 {tasks_section}{chat_section}
-## Your Task
+## Your Task for This Run
 {task_description}
 
-## Instructions
-1. Read COMPANY.md first for context
-2. Execute your task using the tools available to you
-3. Update MEMORY.md with anything important you learned or decided
-4. If you create/modify files, note what you changed
-5. Be concise in your final summary
+## Critical Instructions
+1. ALL file operations must use absolute paths starting with {abs_workspace}/
+2. Check {abs_workspace}/STEERING.md first for human overrides
+3. Read your PLAN.md to find the next unchecked task (- [ ])
+4. Execute ONE task only (fresh context pattern — don't try to do everything)
+5. Validate your work before marking complete
+6. Mark the task done: change - [ ] to - [x]
+7. Update {abs_workspace}/departments/{department_type}/MEMORY.md with key learnings
+8. Be concise in your final summary — state what you did and what changed
 """
-
-
-def _get_role_description(department_type: str) -> str:
-    """Department-specific role descriptions."""
-    roles = {
-        "ceo": """You are the CEO. You set strategic direction, review progress, create and prioritize tasks 
-for other departments, and make key business decisions. Update COMPANY.md with strategy changes.""",
-        
-        "developer": """You are the lead developer. You write production-quality code, build features, 
-fix bugs, run tests, and handle deployments. Work in the code/ directory. Use git for version control.
-Run builds with npm/node to verify your work compiles.""",
-        
-        "marketing": """You are the marketing director. You create compelling content (blog posts, social media 
-posts, email copy), plan campaigns, and track engagement. Save content drafts to content/. 
-Research competitors and trending topics.""",
-        
-        "sales": """You are the sales lead. You optimize conversion funnels, create landing page copy, 
-set up pricing, and track sales metrics. Focus on what drives signups and revenue.""",
-        
-        "finance": """You are the CFO. You track revenue, costs, and profitability. Create financial 
-reports and projections. Monitor agent spending and ROI. Recommend budget adjustments.""",
-        
-        "support": """You are the support lead. You monitor customer inquiries, create FAQ documentation, 
-triage issues, and ensure customer satisfaction. Document common issues and solutions.""",
-    }
-    return roles.get(department_type, "Execute your assigned tasks efficiently.")
 
 
 async def spawn_agent_session(
@@ -160,7 +250,7 @@ async def spawn_agent_session(
 ) -> dict:
     """
     Spawn an OpenClaw agent session via the Gateway HTTP API.
-    Returns immediately with session info. Results come async via announce.
+    Uses model tiering: CEO=Opus, others=Sonnet.
     """
     workspace = get_company_workspace(company_id, company_slug)
     agent_id = DEPT_TO_AGENT.get(department_type, "coordinator")
@@ -169,11 +259,16 @@ async def spawn_agent_session(
     if not token:
         return {"status": "error", "message": "No gateway token configured"}
 
+    # Model tiering
+    if not model:
+        model = get_model_for_department(department_type)
+
     task_prompt = _build_task_prompt(
         company_name=company_name,
         company_mission=company_mission,
         department_type=department_type,
         task_description=task_description,
+        workspace=workspace,
         pending_tasks=pending_tasks,
         chat_history=chat_history,
     )
@@ -188,7 +283,10 @@ async def spawn_agent_session(
     if model:
         spawn_args["model"] = model
 
-    logger.info(f"Spawning {department_type} agent (openclaw:{agent_id}) for {company_slug}")
+    logger.info(
+        f"Spawning {department_type} agent (openclaw:{agent_id}, model:{model}) "
+        f"for {company_slug}"
+    )
 
     try:
         async with httpx.AsyncClient() as client:
@@ -202,7 +300,7 @@ async def spawn_agent_session(
                     "tool": "sessions_spawn",
                     "args": spawn_args,
                 },
-                timeout=30.0,  # Just the spawn request, not the run
+                timeout=30.0,
             )
             
             result = response.json()
@@ -215,7 +313,16 @@ async def spawn_agent_session(
                     "message": error.get("message", str(error)),
                 }
 
-            details = result.get("result", {}).get("details", {})
+            # Parse the nested result
+            content = result.get("result", {}).get("content", [])
+            details = {}
+            for item in content:
+                if item.get("type") == "text":
+                    try:
+                        details = json.loads(item["text"])
+                    except (json.JSONDecodeError, KeyError):
+                        pass
+
             return {
                 "status": "accepted",
                 "session_key": details.get("childSessionKey"),
@@ -223,6 +330,7 @@ async def spawn_agent_session(
                 "agent_id": agent_id,
                 "department": department_type,
                 "company_slug": company_slug,
+                "model": model,
             }
 
     except httpx.TimeoutException:

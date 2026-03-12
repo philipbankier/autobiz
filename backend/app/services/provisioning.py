@@ -66,6 +66,7 @@ class CompanyProvisioner:
 
     async def provision_workspace(self) -> dict:
         """Create the company workspace directory structure."""
+        # Core dirs
         dirs = [
             self.workspace,
             self.workspace / "code",
@@ -74,8 +75,39 @@ class CompanyProvisioner:
             self.workspace / "knowledge",
             self.workspace / "skills",
         ]
+        # Department dirs with ralph loop structure
+        for dept in ["ceo", "developer", "marketing", "sales", "finance", "support"]:
+            dirs.append(self.workspace / "departments" / dept)
+
         for d in dirs:
             d.mkdir(parents=True, exist_ok=True)
+
+        # Department PLAN.md and MEMORY.md files
+        for dept in ["ceo", "developer", "marketing", "sales", "finance", "support"]:
+            dept_dir = self.workspace / "departments" / dept
+            plan_md = dept_dir / "PLAN.md"
+            if not plan_md.exists():
+                plan_md.write_text(f"# {dept.upper()} — Task Plan\n\n## Tasks\n\n(No tasks yet — CEO will create the initial plan)\n")
+            dept_memory = dept_dir / "MEMORY.md"
+            if not dept_memory.exists():
+                dept_memory.write_text(f"# {dept.upper()} — Department Memory\n\n## Key Decisions\n\n## Lessons Learned\n\n## Important Context\n")
+
+        # STEERING.md — human can edit anytime to redirect agents
+        steering_md = self.workspace / "STEERING.md"
+        if not steering_md.exists():
+            steering_md.write_text(f"""# Steering — Human Overrides
+
+Edit this file anytime to redirect the agents. They check it at the start of each run.
+
+## Current Direction
+(No overrides — agents operating autonomously)
+
+## Priority Override
+(Leave empty unless you want to force a specific focus)
+
+## Blocked Actions
+(List anything agents should NOT do right now)
+""")
 
         # COMPANY.md — the company's "brain"
         company_md = self.workspace / "COMPANY.md"
