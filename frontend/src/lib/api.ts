@@ -238,3 +238,39 @@ export async function getBalance() {
 export async function getUsage() {
   return fetchApi<{ total_cost: string; breakdown: Record<string, string> }>("/api/billing/usage");
 }
+
+// === Onboarding ===
+
+export async function onboardCompany(companyId: string) {
+  return fetchApi<{ status: string }>(`/api/companies/${companyId}/onboard`, {
+    method: "POST",
+  });
+}
+
+export async function getCompanyFile(companyId: string, path: string) {
+  return fetchApi<{ content: string }>(`/api/companies/${companyId}/files/${encodeURIComponent(path)}`);
+}
+
+export function connectActivityStream(
+  companyId: string,
+  onEvent: (event: Record<string, unknown>) => void
+): EventSource {
+  const token = getToken();
+  const url = `${API_URL}/api/companies/${companyId}/activity/stream${token ? `?token=${token}` : ""}`;
+  const es = new EventSource(url);
+
+  es.onmessage = (msg) => {
+    try {
+      const parsed = JSON.parse(msg.data);
+      onEvent(parsed);
+    } catch {
+      onEvent({ type: "raw", data: msg.data });
+    }
+  };
+
+  es.onerror = () => {
+    onEvent({ type: "error", message: "Connection lost. Events may have been missed." });
+  };
+
+  return es;
+}
