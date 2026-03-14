@@ -28,6 +28,8 @@ from app.services.cost_control import (
     estimate_cost,
     get_model_for_department,
 )
+from app.services.site_deploy import deploy_to_vercel, copy_site_to_code
+from app.services.git_service import git_commit, git_push, git_status
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,35 @@ def _run_async(coro):
         return loop.run_until_complete(coro)
     finally:
         loop.close()
+
+
+async def _post_run_deploy(slug: str) -> dict:
+    """Auto-deploy after a developer agent run if files changed."""
+    status = await git_status(slug)
+    if not status.get("has_changes"):
+        return {"status": "no_changes"}
+
+    # Copy site/ into code/ if site files exist
+    copied = copy_site_to_code(slug)
+
+    # Commit and push
+    commit_result = await git_commit(slug, "auto-deploy: developer agent changes")
+    if commit_result["status"] == "error":
+        return commit_result
+
+    if commit_result["status"] == "no_changes":
+        return {"status": "no_changes"}
+
+    push_result = await git_push(slug)
+    if push_result["status"] == "error":
+        return push_result
+
+    return {
+        "status": "deployed",
+        "commit": commit_result.get("sha"),
+        "branch": push_result.get("branch"),
+        "files_copied": len(copied),
+    }
 
 
 async def _execute_department_cycle(
@@ -147,7 +178,18 @@ async def _execute_department_cycle(
 
             await db2.commit()
 
-        return {
+        # 7. POST-RUN DEPLOY HOOK (developer only)
+        deploy_result = None
+        if department_type == "developer" and spawn_result.get("status") == "accepted":
+            try:
+                deploy_result = await _post_run_deploy(company.slug)
+                if deploy_result.get("status") == "deployed":
+                    logger.info(f"[{company.slug}/developer] Auto-deployed: {deploy_result.get('commit')}")
+            except Exception as e:
+                logger.error(f"[{company.slug}/developer] Post-run deploy failed: {e}")
+                deploy_result = {"status": "error", "message": str(e)}
+
+        result = {
             "status": spawn_result.get("status"),
             "department": department_type,
             "company": company.slug,
@@ -159,6 +201,9 @@ async def _execute_department_cycle(
             },
             **spawn_result,
         }
+        if deploy_result:
+            result["deploy"] = deploy_result
+        return result
 
 
 @celery_app.task(name="run_department_execution_cycle")
