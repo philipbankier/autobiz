@@ -2,7 +2,12 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.routers import auth, companies, departments, activity, chat, tasks, billing, dashboard, knowledge, site
+import asyncio
+import logging
+
+from app.routers import auth, companies, departments, activity, chat, tasks, billing, dashboard, knowledge, site, webhooks
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="AutoBiz API",
@@ -30,6 +35,7 @@ app.include_router(billing.router)
 app.include_router(dashboard.router)
 app.include_router(knowledge.router)
 app.include_router(site.router)
+app.include_router(webhooks.router)
 
 
 @app.exception_handler(Exception)
@@ -42,6 +48,15 @@ async def global_exception_handler(request: Request, exc: Exception):
             "meta": None,
         },
     )
+
+
+@app.on_event("startup")
+async def startup():
+    """Start the fallback scheduler loop on app startup."""
+    from app.services.scheduler import scheduler_loop
+    # Run scheduler every 30 minutes as a backup to OpenClaw cron
+    asyncio.create_task(scheduler_loop(interval_seconds=1800))
+    logger.info("Fallback scheduler loop started (30 min interval)")
 
 
 @app.get("/api/health")

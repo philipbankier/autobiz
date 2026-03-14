@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.worker import celery_app
-from app.database import async_session_factory
+from app.database import async_session
 from app.models.agent_run import AgentRun, RunStatus
 from app.models.company import Company
 from app.models.department import Department, DepartmentType, DepartmentStatus
@@ -47,7 +47,7 @@ async def _execute_department_cycle(
     task_override: str | None = None,
 ) -> dict:
     """Core logic for running a department agent cycle."""
-    async with async_session_factory() as db:
+    async with async_session() as db:
         # Load company and department
         company = await db.get(Company, uuid.UUID(company_id))
         if not company:
@@ -118,7 +118,7 @@ async def _execute_department_cycle(
             spawn_result = {"status": "error", "message": str(e)}
 
         # 5. UPDATE RUN STATUS
-        async with async_session_factory() as db2:
+        async with async_session() as db2:
             run = await db2.get(AgentRun, agent_run.id)
             dept = await db2.get(Department, department.id)
 
@@ -241,8 +241,9 @@ def run_onboarding(company_id: str, business_idea: str):
     """
     CEO onboarding — the user described their business idea.
     CEO agent ralph-loops on it to create a full business plan.
+    Then auto-registers cron jobs so the company runs autonomously.
     """
-    return _run_async(_execute_department_cycle(
+    result = _run_async(_execute_department_cycle(
         company_id,
         "ceo",
         task_override=f"""The human owner just created this company with the following business idea:
@@ -272,3 +273,17 @@ Make the plans specific and actionable. Each task should be small enough for one
 Think like a founder — what's the fastest path to first paying customer?
 """,
     ))
+
+    # Auto-register cron jobs after successful onboarding
+    if result and result.get("status") == "accepted":
+        try:
+            from app.services.agent_scheduler import schedule_company_cycles
+            slug = result.get("company", "")
+            cron_result = schedule_company_cycles(company_id, slug=slug or None)
+            logger.info(f"Auto-registered cron jobs after onboarding for {company_id}: {cron_result}")
+            result["cron_jobs"] = cron_result
+        except Exception as e:
+            logger.error(f"Failed to auto-register cron jobs for {company_id}: {e}")
+            result["cron_jobs_error"] = str(e)
+
+    return result

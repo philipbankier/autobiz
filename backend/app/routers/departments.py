@@ -81,7 +81,7 @@ async def trigger_department(
     current_user: User = Depends(get_current_user),
 ):
     """Manually trigger an agent execution cycle for a department."""
-    await _verify_ownership(company_id, current_user, db)
+    company = await _verify_ownership(company_id, current_user, db)
     result = await db.execute(
         select(Department).where(
             Department.company_id == company_id,
@@ -92,11 +92,17 @@ async def trigger_department(
     if department is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
 
-    from app.services.agent_scheduler import trigger_department_cycle
+    from app.services.scheduler import smart_dispatch
 
-    task_id = trigger_department_cycle(str(company_id), dept_type.value)
+    result = await smart_dispatch(
+        company_id=str(company_id),
+        slug=company.slug,
+        department_type=dept_type.value,
+        force=False,
+    )
+
     return {
-        "data": {"task_id": task_id, "department": dept_type.value, "status": "triggered"},
+        "data": result,
         "error": None,
         "meta": None,
     }

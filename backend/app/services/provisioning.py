@@ -51,6 +51,7 @@ class CompanyProvisioner:
             ("vercel", self.provision_vercel),
             ("stripe", self.provision_stripe),
             ("email", self.provision_email),
+            ("scheduler", self.provision_scheduler),
         ]
 
         for step_name, step_fn in steps:
@@ -332,6 +333,23 @@ planning
         return {
             "account_id": account_data["id"],
             "onboarding_url": onboard_url,
+        }
+
+    async def provision_scheduler(self) -> dict:
+        """Register OpenClaw cron jobs for automated department cycles."""
+        from app.services.scheduler import register_company_cron_jobs
+
+        results = await register_company_cron_jobs(self.company_id, self.slug)
+        registered = sum(1 for r in results.values() if r.get("status") == "registered")
+        total = len(results)
+
+        if registered == 0:
+            raise ProvisioningError(f"No cron jobs registered (0/{total})")
+
+        return {
+            "registered": registered,
+            "total": total,
+            "jobs": results,
         }
 
     async def provision_email(self) -> dict:

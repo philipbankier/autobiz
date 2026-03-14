@@ -151,6 +151,90 @@ async def run_department(
     }
 
 
+# ── Scheduler management endpoints ──
+
+@router.post("/{company_id}/scheduler/start", response_model=dict)
+async def scheduler_start(
+    company_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Register cron jobs for all departments of a company."""
+    company = await _get_owned_company(company_id, current_user, db)
+
+    from app.services.scheduler import register_company_cron_jobs
+    result = await register_company_cron_jobs(str(company.id), company.slug)
+
+    return {
+        "data": {"company_id": str(company.id), "slug": company.slug, "jobs": result},
+        "error": None,
+        "meta": None,
+    }
+
+
+@router.post("/{company_id}/scheduler/stop", response_model=dict)
+async def scheduler_stop(
+    company_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Unregister all cron jobs for a company."""
+    company = await _get_owned_company(company_id, current_user, db)
+
+    from app.services.scheduler import unregister_company_cron_jobs
+    result = await unregister_company_cron_jobs(company.slug)
+
+    return {
+        "data": {"company_id": str(company.id), "slug": company.slug, "jobs": result},
+        "error": None,
+        "meta": None,
+    }
+
+
+@router.get("/{company_id}/scheduler/status", response_model=dict)
+async def scheduler_status(
+    company_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List active cron jobs for a company."""
+    company = await _get_owned_company(company_id, current_user, db)
+
+    from app.services.scheduler import list_company_cron_jobs
+    jobs = await list_company_cron_jobs(company.slug)
+
+    return {
+        "data": {"company_id": str(company.id), "slug": company.slug, "jobs": jobs},
+        "error": None,
+        "meta": {"count": len(jobs)},
+    }
+
+
+@router.post("/{company_id}/scheduler/trigger/{dept}", response_model=dict)
+async def scheduler_trigger(
+    company_id: uuid.UUID,
+    dept: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Manually trigger a department cycle with condition checks via smart_dispatch."""
+    company = await _get_owned_company(company_id, current_user, db)
+
+    from app.services.scheduler import smart_dispatch
+    result = await smart_dispatch(
+        company_id=str(company.id),
+        slug=company.slug,
+        department_type=dept,
+        force=False,
+    )
+
+    return {
+        "data": result,
+        "error": None,
+        "meta": None,
+    }
+
+
 @router.delete("/{company_id}", response_model=dict)
 async def delete(
     company_id: uuid.UUID,
