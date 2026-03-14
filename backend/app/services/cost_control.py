@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.cost_event import CostEvent, CostType
 from app.models.department import Department
+from app.services.event_bus import publish_sync, EventType
 
 logger = logging.getLogger(__name__)
 
@@ -103,11 +104,23 @@ async def check_budget(
     if pct >= 100:
         warning = f"BUDGET EXCEEDED: ${spend:.2f}/${budget:.2f} ({pct:.0f}%)"
         logger.warning(f"[{department.type.value}] {warning}")
+        publish_sync(
+            str(department.company_id), EventType.budget_exceeded,
+            department=department.type.value,
+            message=warning,
+            data={"spend": str(spend), "budget": str(budget), "pct": pct},
+        )
         return {"allowed": False, "spend": spend, "budget": budget, "pct": pct, "warning": warning}
 
     if pct >= 80:
         warning = f"Budget warning: ${spend:.2f}/${budget:.2f} ({pct:.0f}%)"
         logger.info(f"[{department.type.value}] {warning}")
+        publish_sync(
+            str(department.company_id), EventType.budget_warning,
+            department=department.type.value,
+            message=warning,
+            data={"spend": str(spend), "budget": str(budget), "pct": pct},
+        )
 
     return {"allowed": True, "spend": spend, "budget": budget, "pct": pct, "warning": warning}
 

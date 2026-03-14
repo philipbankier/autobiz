@@ -30,6 +30,7 @@ from app.services.cost_control import (
 )
 from app.services.site_deploy import deploy_to_vercel, copy_site_to_code
 from app.services.git_service import git_commit, git_push, git_status
+from app.services.event_bus import publish_sync, EventType
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +111,22 @@ async def _execute_department_cycle(
         if budget_status["warning"]:
             logger.info(f"[{company.slug}/{department_type}] {budget_status['warning']}")
 
+        # Emit budget warning event
+        if budget_status["warning"] and budget_status["allowed"]:
+            publish_sync(
+                company_id, EventType.budget_warning,
+                department=department_type,
+                message=budget_status["warning"],
+                data={"spend": str(budget_status["spend"]), "budget": str(budget_status["budget"]), "pct": budget_status["pct"]},
+            )
+        elif not budget_status["allowed"]:
+            publish_sync(
+                company_id, EventType.budget_exceeded,
+                department=department_type,
+                message=budget_status["warning"] or "Budget exceeded",
+                data={"spend": str(budget_status["spend"]), "budget": str(budget_status["budget"])},
+            )
+
         # 2. CREATE AGENT RUN RECORD
         agent_run = AgentRun(
             company_id=company.id,
@@ -122,6 +139,13 @@ async def _execute_department_cycle(
         department.status = DepartmentStatus.running
         await db.flush()
         await db.commit()
+
+        # Emit agent_started event
+        publish_sync(
+            company_id, EventType.agent_started,
+            department=department_type,
+            message=f"{department_type} agent cycle started",
+        )
 
         # 3. BUILD TASK DESCRIPTION
         task = task_override or (
@@ -178,13 +202,40 @@ async def _execute_department_cycle(
 
             await db2.commit()
 
+        # Emit completion/failure event
+        if spawn_result.get("status") == "accepted":
+            publish_sync(
+                company_id, EventType.agent_completed,
+                department=department_type,
+                message=f"{department_type} agent cycle completed",
+                data={"model": model},
+            )
+        else:
+            publish_sync(
+                company_id, EventType.agent_failed,
+                department=department_type,
+                message=f"{department_type} agent cycle failed: {spawn_result.get('message', 'Unknown error')}",
+                data={"error": spawn_result.get("message")},
+            )
+
         # 7. POST-RUN DEPLOY HOOK (developer only)
         deploy_result = None
         if department_type == "developer" and spawn_result.get("status") == "accepted":
+            publish_sync(
+                company_id, EventType.deploy_started,
+                department="developer",
+                message="Auto-deploy started after developer changes",
+            )
             try:
                 deploy_result = await _post_run_deploy(company.slug)
                 if deploy_result.get("status") == "deployed":
                     logger.info(f"[{company.slug}/developer] Auto-deployed: {deploy_result.get('commit')}")
+                    publish_sync(
+                        company_id, EventType.deploy_completed,
+                        department="developer",
+                        message=f"Deploy completed: {deploy_result.get('commit', '')[:8]}",
+                        data=deploy_result,
+                    )
             except Exception as e:
                 logger.error(f"[{company.slug}/developer] Post-run deploy failed: {e}")
                 deploy_result = {"status": "error", "message": str(e)}

@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import async_session
+from app.services.event_bus import publish_sync, EventType
 from app.models.company import Company, CompanyStatus
 from app.models.department import Department, DepartmentType, DepartmentStatus
 
@@ -340,6 +341,12 @@ async def smart_dispatch(
     check = await should_run(company_id, slug, department_type, force=force)
     if not check["run"]:
         logger.info(f"[{slug}/{department_type}] Skipped: {check['reason']}")
+        publish_sync(
+            company_id, EventType.run_skipped,
+            department=department_type,
+            message=f"Run skipped: {check['reason']}",
+            data={"reason": check["reason"]},
+        )
         return {"status": "skipped", "reason": check["reason"]}
 
     # Dispatch to Celery

@@ -52,8 +52,13 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 @app.on_event("startup")
 async def startup():
-    """Start the fallback scheduler loop on app startup."""
+    """Start the fallback scheduler loop and event bus on app startup."""
     from app.services.scheduler import scheduler_loop
+    from app.services.event_bus import set_event_loop
+
+    # Capture event loop for sync→async event publishing bridge
+    set_event_loop(asyncio.get_running_loop())
+
     # Run scheduler every 30 minutes as a backup to OpenClaw cron
     asyncio.create_task(scheduler_loop(interval_seconds=1800))
     logger.info("Fallback scheduler loop started (30 min interval)")
