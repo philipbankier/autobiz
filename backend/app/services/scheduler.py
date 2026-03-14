@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import async_session
-from app.models.company import Company
+from app.models.company import Company, CompanyStatus
 from app.models.department import Department, DepartmentType, DepartmentStatus
 
 logger = logging.getLogger(__name__)
@@ -76,18 +76,14 @@ def _get_gateway_token() -> str:
 async def register_company_cron_jobs(company_id: str, slug: str) -> dict:
     """
     Register OpenClaw cron jobs for a company's department cycles.
-    Uses isolated sessions so each run gets fresh context.
+    Uses the openclaw CLI which is the supported interface for cron management.
     """
-    token = _get_gateway_token()
-    if not token:
-        return {"status": "error", "message": "No gateway token"}
-
     results = {}
     workspace = str(COMPANIES_DIR / slug)
 
     for dept_type, schedule in DEFAULT_SCHEDULES.items():
         job_id = f"autobiz-{slug}-{dept_type}"
-        
+
         # Build the cron job task message
         task_message = (
             f"You are the {dept_type.upper()} department of company '{slug}'. "
@@ -100,43 +96,34 @@ async def register_company_cron_jobs(company_id: str, slug: str) -> dict:
         )
 
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{GATEWAY_URL}/tools/invoke",
-                    headers={
-                        "Authorization": f"Bearer {token}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "tool": "cron.add",
-                        "args": {
-                            "jobId": job_id,
-                            "name": f"{slug} {dept_type} cycle",
-                            "schedule": {
-                                "kind": "cron",
-                                "expr": schedule["cron"],
-                                "tz": "America/New_York",
-                            },
-                            "sessionTarget": "isolated",
-                            "payload": {
-                                "kind": "agentTurn",
-                                "message": task_message,
-                                "timeoutSeconds": 300,
-                            },
-                            "delivery": {
-                                "mode": "none",  # Silent — don't spam channels
-                            },
-                        },
-                    },
-                    timeout=10.0,
-                )
-                result = response.json()
-                if result.get("ok"):
-                    results[dept_type] = {"status": "registered", "job_id": job_id, "expr": schedule["cron"]}
-                    logger.info(f"Registered cron job: {job_id} ({schedule['cron']})")
-                else:
-                    results[dept_type] = {"status": "error", "message": str(result.get("error", ""))}
-                    logger.warning(f"Failed to register cron job {job_id}: {result}")
+            proc = await asyncio.create_subprocess_exec(
+                "openclaw", "cron", "add",
+                "--name", f"autobiz-{slug}-{dept_type}",
+                "--cron", schedule["cron"],
+                "--tz", "America/New_York",
+                "--session", "isolated",
+                "--message", task_message,
+                "--no-deliver",
+                "--json",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15.0)
+            output = stdout.decode() + stderr.decode()
+
+            if proc.returncode == 0:
+                # Parse job ID from JSON output
+                actual_job_id = job_id
+                try:
+                    result_data = json.loads(stdout.decode())
+                    actual_job_id = result_data.get("id") or result_data.get("jobId") or job_id
+                except (json.JSONDecodeError, KeyError):
+                    pass
+                results[dept_type] = {"status": "registered", "job_id": actual_job_id, "expr": schedule["cron"]}
+                logger.info(f"Registered cron job: {actual_job_id} ({schedule['cron']})")
+            else:
+                results[dept_type] = {"status": "error", "message": output.strip()}
+                logger.warning(f"Failed to register cron job {job_id}: {output}")
         except Exception as e:
             results[dept_type] = {"status": "error", "message": str(e)}
             logger.error(f"Cron registration error for {job_id}: {e}")
@@ -145,67 +132,71 @@ async def register_company_cron_jobs(company_id: str, slug: str) -> dict:
 
 
 async def unregister_company_cron_jobs(slug: str) -> dict:
-    """Remove all cron jobs for a company."""
-    token = _get_gateway_token()
+    """Remove all cron jobs for a company by finding them by name prefix."""
     results = {}
+    prefix = f"autobiz-{slug}-"
 
-    for dept_type in DEFAULT_SCHEDULES:
-        job_id = f"autobiz-{slug}-{dept_type}"
+    # First list all jobs to find IDs matching our naming convention
+    all_jobs = await list_company_cron_jobs(slug)
+
+    if not all_jobs:
+        return {dept: "not_found" for dept in DEFAULT_SCHEDULES}
+
+    for job in all_jobs:
+        job_id = job.get("id") or job.get("jobId", "")
+        job_name = job.get("name", "")
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{GATEWAY_URL}/tools/invoke",
-                    headers={
-                        "Authorization": f"Bearer {token}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "tool": "cron.remove",
-                        "args": {"jobId": job_id},
-                    },
-                    timeout=10.0,
-                )
-                results[dept_type] = "removed" if response.json().get("ok") else "not_found"
+            proc = await asyncio.create_subprocess_exec(
+                "openclaw", "cron", "remove", job_id,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10.0)
+            # Extract dept type from name (autobiz-{slug}-{dept})
+            dept = job_name.replace(prefix, "").replace(f"autobiz-{slug}-", "") if prefix in job_name else job_name
+            results[dept or job_id] = "removed" if proc.returncode == 0 else "error"
         except Exception as e:
-            results[dept_type] = f"error: {e}"
+            results[job_id] = f"error: {e}"
+
+    # Mark any departments without jobs as not_found
+    for dept in DEFAULT_SCHEDULES:
+        if dept not in results:
+            results[dept] = "not_found"
 
     return results
 
 
 async def list_company_cron_jobs(slug: str) -> list:
     """List all active cron jobs for a company."""
-    token = _get_gateway_token()
     prefix = f"autobiz-{slug}-"
 
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{GATEWAY_URL}/tools/invoke",
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json",
-                },
-                json={"tool": "cron.list", "args": {}},
-                timeout=10.0,
-            )
-            result = response.json()
-            if not result.get("ok"):
-                return []
+        proc = await asyncio.create_subprocess_exec(
+            "openclaw", "cron", "list", "--json",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10.0)
 
-            # Filter to this company's jobs
-            content = result.get("result", {}).get("content", [])
-            jobs = []
-            for item in content:
-                if item.get("type") == "text":
-                    try:
-                        data = json.loads(item["text"])
-                        for job in data.get("jobs", []):
-                            if job.get("jobId", "").startswith(prefix):
-                                jobs.append(job)
-                    except (json.JSONDecodeError, KeyError):
-                        pass
-            return jobs
-    except Exception:
+        if proc.returncode != 0:
+            return []
+
+        data = json.loads(stdout.decode())
+        # Filter to this company's jobs by name prefix
+        jobs = []
+        if isinstance(data, list):
+            for job in data:
+                name = job.get("name", "")
+                if name.startswith(prefix):
+                    jobs.append(job)
+        elif isinstance(data, dict):
+            for job in data.get("jobs", data.get("items", [])):
+                name = job.get("name", "")
+                if name.startswith(prefix):
+                    jobs.append(job)
+        return jobs
+    except Exception as e:
+        logger.error(f"Failed to list cron jobs: {e}")
         return []
 
 
@@ -385,7 +376,7 @@ async def scheduler_loop(interval_seconds: int = 1800):
         try:
             async with async_session() as db:
                 result = await db.execute(
-                    select(Company).where(Company.is_active == True)
+                    select(Company).where(Company.status.in_([CompanyStatus.building, CompanyStatus.running]))
                 )
                 companies = result.scalars().all()
 
