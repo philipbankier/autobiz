@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 import asyncio
 import logging
 
-from app.routers import auth, companies, departments, activity, chat, tasks, billing, dashboard, knowledge, site, webhooks
+from app.routers import auth, companies, departments, activity, chat, tasks, billing, dashboard, knowledge, site, webhooks, integrations
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +36,7 @@ app.include_router(dashboard.router)
 app.include_router(knowledge.router)
 app.include_router(site.router)
 app.include_router(webhooks.router)
+app.include_router(integrations.router)
 
 
 @app.exception_handler(Exception)

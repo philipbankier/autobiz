@@ -73,6 +73,115 @@ async def _post_run_deploy(slug: str) -> dict:
     }
 
 
+async def _dispatch_queued_content(slug: str) -> dict:
+    """
+    After marketing/sales/support agent runs, check for queued content
+    in content/tweets.json, content/linkedin.json, and content/emails.json.
+    Process pending items and update their status.
+    """
+    import json
+    from pathlib import Path
+    from datetime import datetime, timezone as tz
+
+    content_dir = Path(f"/home/philip/TinkerLab/autobiz/companies/{slug}/content")
+    results = {"dispatched": 0, "tweets": 0, "linkedin": 0, "emails": 0, "errors": []}
+
+    # ── Tweets ──
+    tweets_file = content_dir / "tweets.json"
+    if tweets_file.exists():
+        try:
+            entries = json.loads(tweets_file.read_text())
+            from app.services.social_media import post_tweet
+
+            changed = False
+            for entry in entries:
+                if entry.get("status") != "pending":
+                    continue
+                result = await post_tweet(slug, entry["text"])
+                if result["status"] == "ok":
+                    entry["status"] = "sent"
+                    entry["sent_at"] = datetime.now(tz.utc).isoformat()
+                    entry["tweet_id"] = result.get("tweet_id")
+                    results["tweets"] += 1
+                    results["dispatched"] += 1
+                else:
+                    entry["status"] = "failed"
+                    entry["error"] = result.get("message")
+                    results["errors"].append(f"tweet: {result.get('message')}")
+                changed = True
+
+            if changed:
+                tweets_file.write_text(json.dumps(entries, indent=2))
+        except Exception as e:
+            results["errors"].append(f"tweets.json: {e}")
+
+    # ── LinkedIn ──
+    linkedin_file = content_dir / "linkedin.json"
+    if linkedin_file.exists():
+        try:
+            entries = json.loads(linkedin_file.read_text())
+            from app.services.social_media import post_linkedin
+
+            changed = False
+            for entry in entries:
+                if entry.get("status") != "pending":
+                    continue
+                result = await post_linkedin(slug, entry["text"])
+                if result["status"] == "ok":
+                    entry["status"] = "sent"
+                    entry["sent_at"] = datetime.now(tz.utc).isoformat()
+                    entry["post_id"] = result.get("post_id")
+                    results["linkedin"] += 1
+                    results["dispatched"] += 1
+                else:
+                    entry["status"] = "failed"
+                    entry["error"] = result.get("message")
+                    results["errors"].append(f"linkedin: {result.get('message')}")
+                changed = True
+
+            if changed:
+                linkedin_file.write_text(json.dumps(entries, indent=2))
+        except Exception as e:
+            results["errors"].append(f"linkedin.json: {e}")
+
+    # ── Emails ──
+    emails_file = content_dir / "emails.json"
+    if emails_file.exists():
+        try:
+            entries = json.loads(emails_file.read_text())
+            from app.services.email_service import send_email
+
+            changed = False
+            for entry in entries:
+                if entry.get("status") != "pending":
+                    continue
+                result = await send_email(
+                    slug,
+                    to=entry["to"],
+                    subject=entry["subject"],
+                    html_body=entry["html_body"],
+                    text_body=entry.get("text_body"),
+                )
+                if result["status"] == "ok":
+                    entry["status"] = "sent"
+                    entry["sent_at"] = datetime.now(tz.utc).isoformat()
+                    entry["email_id"] = result.get("email_id")
+                    results["emails"] += 1
+                    results["dispatched"] += 1
+                else:
+                    entry["status"] = "failed"
+                    entry["error"] = result.get("message")
+                    results["errors"].append(f"email: {result.get('message')}")
+                changed = True
+
+            if changed:
+                emails_file.write_text(json.dumps(entries, indent=2))
+        except Exception as e:
+            results["errors"].append(f"emails.json: {e}")
+
+    return results
+
+
 async def _execute_department_cycle(
     company_id: str,
     department_type: str,
@@ -218,7 +327,16 @@ async def _execute_department_cycle(
                 data={"error": spawn_result.get("message")},
             )
 
-        # 7. POST-RUN DEPLOY HOOK (developer only)
+        # 7. POST-RUN CONTENT DISPATCH (marketing, sales, support)
+        if department_type in ("marketing", "sales", "support") and spawn_result.get("status") == "accepted":
+            try:
+                dispatch_result = await _dispatch_queued_content(company.slug)
+                if dispatch_result.get("dispatched"):
+                    logger.info(f"[{company.slug}/{department_type}] Content dispatched: {dispatch_result}")
+            except Exception as e:
+                logger.error(f"[{company.slug}/{department_type}] Content dispatch failed: {e}")
+
+        # 8. POST-RUN DEPLOY HOOK (developer only)
         deploy_result = None
         if department_type == "developer" and spawn_result.get("status") == "accepted":
             publish_sync(
