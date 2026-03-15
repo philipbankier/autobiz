@@ -251,6 +251,66 @@ export async function getCompanyFile(companyId: string, path: string) {
   return fetchApi<{ content: string }>(`/api/companies/${companyId}/files/${encodeURIComponent(path)}`);
 }
 
+// === Scheduler ===
+
+export async function getSchedulerStatus(companyId: string) {
+  return fetchApi<{ company_id: string; slug: string; jobs: Record<string, unknown>[] }>(
+    `/api/companies/${companyId}/scheduler/status`
+  );
+}
+
+export async function startScheduler(companyId: string) {
+  return fetchApi<{ company_id: string; slug: string; jobs: Record<string, unknown>[] }>(
+    `/api/companies/${companyId}/scheduler/start`,
+    { method: "POST" }
+  );
+}
+
+export async function stopScheduler(companyId: string) {
+  return fetchApi<{ company_id: string; slug: string; jobs: Record<string, unknown>[] }>(
+    `/api/companies/${companyId}/scheduler/stop`,
+    { method: "POST" }
+  );
+}
+
+export async function smartTrigger(companyId: string, dept: string) {
+  return fetchApi<Record<string, unknown>>(
+    `/api/companies/${companyId}/scheduler/trigger/${dept}`,
+    { method: "POST" }
+  );
+}
+
+// === Steering ===
+
+export async function getSteeringFile(companyId: string) {
+  return fetchApi<{ content: string }>(`/api/companies/${companyId}/steering`);
+}
+
+export async function updateSteeringFile(companyId: string, content: string) {
+  return fetchApi<{ content: string }>(`/api/companies/${companyId}/steering`, {
+    method: "PUT",
+    body: JSON.stringify({ content }),
+  });
+}
+
+// === Activity Events ===
+
+export async function getActivityEvents(companyId: string, limit = 50) {
+  return fetchApi<Record<string, unknown>[]>(
+    `/api/companies/${companyId}/activity/events?limit=${limit}`
+  );
+}
+
+// === Integrations ===
+
+export async function getIntegrationStatus(companyId: string) {
+  return fetchApi<Record<string, unknown>>(
+    `/api/companies/${companyId}/integrations/status`
+  );
+}
+
+// === SSE Stream ===
+
 export function connectActivityStream(
   companyId: string,
   onEvent: (event: Record<string, unknown>) => void

@@ -235,6 +235,53 @@ async def scheduler_trigger(
     }
 
 
+# ── Steering file endpoints ──
+
+@router.get("/{company_id}/steering", response_model=dict)
+async def get_steering(
+    company_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Read STEERING.md for a company."""
+    company = await _get_owned_company(company_id, current_user, db)
+
+    from pathlib import Path
+    steering_path = Path("/home/philip/TinkerLab/autobiz/companies") / company.slug / "STEERING.md"
+    content = ""
+    if steering_path.exists():
+        content = steering_path.read_text()
+
+    return {
+        "data": {"content": content},
+        "error": None,
+        "meta": None,
+    }
+
+
+@router.put("/{company_id}/steering", response_model=dict)
+async def update_steering(
+    company_id: uuid.UUID,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Write STEERING.md for a company."""
+    company = await _get_owned_company(company_id, current_user, db)
+
+    content = body.get("content", "")
+    from pathlib import Path
+    steering_path = Path("/home/philip/TinkerLab/autobiz/companies") / company.slug / "STEERING.md"
+    steering_path.parent.mkdir(parents=True, exist_ok=True)
+    steering_path.write_text(content)
+
+    return {
+        "data": {"content": content},
+        "error": None,
+        "meta": {"message": "STEERING.md updated"},
+    }
+
+
 @router.delete("/{company_id}", response_model=dict)
 async def delete(
     company_id: uuid.UUID,
