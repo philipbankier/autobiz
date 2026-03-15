@@ -45,6 +45,10 @@ companies/*/code/
 # Company secrets
 companies/*/.env
 
+# Test companies
+companies/e2e-*/
+companies/bench-*/
+
 # Python
 __pycache__/
 *.pyc
