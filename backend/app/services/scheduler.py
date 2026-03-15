@@ -109,7 +109,7 @@ async def register_company_cron_jobs(company_id: str, slug: str) -> dict:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15.0)
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
             output = stdout.decode() + stderr.decode()
 
             if proc.returncode == 0:

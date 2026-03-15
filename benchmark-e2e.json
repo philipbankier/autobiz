@@ -1,0 +1,81 @@
+{
+  "timestamp": "2026-03-15T07:10:41",
+  "elapsed": 72.0,
+  "company_create_time": 20.1,
+  "passed": 17,
+  "warned": 0,
+  "failed": 0,
+  "total": 17,
+  "results": {
+    "01_health": {
+      "status": "PASS",
+      "message": "OK"
+    },
+    "02_register": {
+      "status": "PASS",
+      "message": "bench-1773572969@autobiz.app"
+    },
+    "03_create": {
+      "status": "PASS",
+      "message": "bench-1773572970 (20.1s)"
+    },
+    "04_workspace": {
+      "status": "PASS",
+      "message": "8/8"
+    },
+    "05_depts": {
+      "status": "PASS",
+      "message": "6/6"
+    },
+    "06_dashboard": {
+      "status": "PASS",
+      "message": "OK"
+    },
+    "07_onboard": {
+      "status": "PASS",
+      "message": "onboarding_started"
+    },
+    "08_condition": {
+      "status": "PASS",
+      "message": "skipped: No pending tasks in support/PLAN.md"
+    },
+    "09_sched_status": {
+      "status": "PASS",
+      "message": "6 jobs from provisioning"
+    },
+    "10_sched_stop": {
+      "status": "PASS",
+      "message": "6 removed"
+    },
+    "11_sched_start": {
+      "status": "PASS",
+      "message": "6/6"
+    },
+    "12_integrations": {
+      "status": "PASS",
+      "message": "OK"
+    },
+    "13_git": {
+      "status": "PASS",
+      "message": "clean"
+    },
+    "14a_steer_read": {
+      "status": "PASS",
+      "message": "331ch"
+    },
+    "14b_steer_write": {
+      "status": "PASS",
+      "message": "OK"
+    },
+    "15_events": {
+      "status": "PASS",
+      "message": "1 events"
+    },
+    "16_site": {
+      "status": "PASS",
+      "message": "not_deployed"
+    }
+  },
+  "slug": "bench-1773572970",
+  "company_id": "063eec73-5d89-44a1-ae02-250827781584"
+}
