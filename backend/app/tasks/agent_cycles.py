@@ -4,13 +4,16 @@ Implements:
 - Budget check before every run
 - Model tiering per department
 - Ralph loop task execution (one task per run)
+- Post-run quality gates (LLM judge)
 - Post-run memory consolidation (async)
 """
 import asyncio
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
+from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,8 +34,18 @@ from app.services.cost_control import (
 from app.services.site_deploy import deploy_to_vercel, copy_site_to_code
 from app.services.git_service import git_commit, git_push, git_status
 from app.services.event_bus import publish_sync, EventType
+from app.services.judge import evaluate_output, should_give_up, consolidate_memory
+from app.services.retry_tracker import (
+    get_retry_count,
+    get_attempt_history,
+    increment_retry,
+    clear_retry,
+    _task_id,
+)
 
 logger = logging.getLogger(__name__)
+
+COMPANIES_DIR = Path("/home/philip/TinkerLab/autobiz/companies")
 
 
 def _run_async(coro):
@@ -182,6 +195,176 @@ async def _dispatch_queued_content(slug: str) -> dict:
     return results
 
 
+def _read_plan_md(slug: str, dept: str) -> str:
+    """Read a department's PLAN.md, return content or empty string."""
+    path = COMPANIES_DIR / slug / "departments" / dept / "PLAN.md"
+    if path.exists():
+        return path.read_text()
+    return ""
+
+
+def _find_current_task(plan_content: str) -> str | None:
+    """Find the first checked task in PLAN.md (most recently completed)."""
+    # Look for the last `[x]` checkbox line — that's what the agent just did
+    matches = re.findall(r"- \[x\]\s+(.+)", plan_content, re.IGNORECASE)
+    return matches[-1].strip() if matches else None
+
+
+def _revert_task_checkbox(slug: str, dept: str, task_text: str) -> None:
+    """Revert a task from [x] back to [ ] in PLAN.md."""
+    path = COMPANIES_DIR / slug / "departments" / dept / "PLAN.md"
+    if not path.exists():
+        return
+    content = path.read_text()
+    # Replace the specific checked task back to unchecked
+    content = content.replace(f"- [x] {task_text}", f"- [ ] {task_text}", 1)
+    path.write_text(content)
+
+
+def _mark_task_blocked(slug: str, dept: str, task_text: str, note: str) -> None:
+    """Mark a task as blocked [!] in PLAN.md with a note."""
+    path = COMPANIES_DIR / slug / "departments" / dept / "PLAN.md"
+    if not path.exists():
+        return
+    content = path.read_text()
+    replacement = f"- [!] {task_text}\n  <!-- BLOCKED: {note} -->"
+    # Try checked first, then unchecked
+    if f"- [x] {task_text}" in content:
+        content = content.replace(f"- [x] {task_text}", replacement, 1)
+    elif f"- [ ] {task_text}" in content:
+        content = content.replace(f"- [ ] {task_text}", replacement, 1)
+    path.write_text(content)
+
+
+def _add_task_comment(slug: str, dept: str, task_text: str, comment: str) -> None:
+    """Add a comment below a task in PLAN.md."""
+    path = COMPANIES_DIR / slug / "departments" / dept / "PLAN.md"
+    if not path.exists():
+        return
+    content = path.read_text()
+    target = f"- [ ] {task_text}"
+    if target in content:
+        content = content.replace(target, f"{target}\n  <!-- Judge: {comment} -->", 1)
+        path.write_text(content)
+
+
+async def _run_quality_gate(
+    slug: str,
+    company_name: str,
+    company_id: str,
+    department_type: str,
+    task_description: str,
+    session_output: str,
+) -> dict:
+    """
+    Post-run quality gate: evaluate output, handle retries, consolidate memory.
+    Returns {passed: bool, feedback: str, action: str}.
+    """
+    # Read the plan to find what task was just completed
+    plan_content = _read_plan_md(slug, department_type)
+    current_task = _find_current_task(plan_content)
+    task_text = current_task or task_description
+
+    # Use agent output or session output for evaluation
+    eval_text = session_output or f"Task completed: {task_text}"
+
+    # Run judge evaluation
+    judge_result = await evaluate_output(
+        department_type=department_type,
+        company_name=company_name,
+        task_description=task_text,
+        agent_output=eval_text,
+    )
+
+    tid = _task_id(task_text)
+
+    if not judge_result["pass"]:
+        # FAIL path
+        feedback = judge_result.get("feedback", "Quality below threshold")
+        score = judge_result.get("overall", 0)
+
+        # Revert the task checkbox
+        if current_task:
+            _revert_task_checkbox(slug, department_type, current_task)
+            _add_task_comment(slug, department_type, current_task, feedback)
+
+        # Track retry
+        attempt_count = increment_retry(slug, department_type, tid, feedback)
+
+        if attempt_count >= 3:
+            # Check if we should give up
+            history = get_attempt_history(slug, department_type, tid)
+            give_up_result = await should_give_up(task_text, history)
+
+            if give_up_result["give_up"]:
+                if current_task:
+                    _mark_task_blocked(
+                        slug, department_type, current_task,
+                        f"Gave up after {attempt_count} attempts: {give_up_result['reason']}"
+                    )
+                clear_retry(slug, department_type, tid)
+
+                publish_sync(
+                    company_id, EventType.agent_failed,
+                    department=department_type,
+                    message=f"Task blocked after {attempt_count} attempts: {task_text[:80]}",
+                    data={
+                        "task": task_text,
+                        "attempts": attempt_count,
+                        "reason": give_up_result["reason"],
+                        "action": "blocked",
+                    },
+                )
+                return {"passed": False, "feedback": feedback, "action": "blocked"}
+
+        publish_sync(
+            company_id, EventType.agent_failed,
+            department=department_type,
+            message=f"Judge failed (score {score}/10): {feedback[:100]}",
+            data={
+                "task": task_text,
+                "score": score,
+                "attempt": attempt_count,
+                "feedback": feedback,
+                "action": "retry",
+            },
+        )
+        return {"passed": False, "feedback": feedback, "action": "retry"}
+
+    # PASS path — consolidate memory
+    if current_task:
+        clear_retry(slug, department_type, tid)
+
+    memory_path = COMPANIES_DIR / slug / "departments" / department_type / "MEMORY.md"
+    current_memory = memory_path.read_text() if memory_path.exists() else ""
+
+    try:
+        updated_memory = await consolidate_memory(
+            company_name=company_name,
+            department_type=department_type,
+            session_output=eval_text,
+            current_memory=current_memory,
+        )
+        if updated_memory and updated_memory != current_memory:
+            memory_path.parent.mkdir(parents=True, exist_ok=True)
+            memory_path.write_text(updated_memory)
+            logger.info(f"[{slug}/{department_type}] Memory consolidated")
+    except Exception as e:
+        logger.warning(f"[{slug}/{department_type}] Memory consolidation failed: {e}")
+
+    publish_sync(
+        company_id, EventType.agent_completed,
+        department=department_type,
+        message=f"Judge passed (score {judge_result['overall']}/10)",
+        data={
+            "task": task_text,
+            "score": judge_result["overall"],
+            "feedback": judge_result.get("feedback", ""),
+        },
+    )
+    return {"passed": True, "feedback": judge_result.get("feedback", ""), "action": "completed"}
+
+
 async def _execute_department_cycle(
     company_id: str,
     department_type: str,
@@ -311,14 +494,27 @@ async def _execute_department_cycle(
 
             await db2.commit()
 
-        # Emit completion/failure event
+        # Run quality gate on successful runs, emit failure event on spawn errors
+        judge_result = None
         if spawn_result.get("status") == "accepted":
-            publish_sync(
-                company_id, EventType.agent_completed,
-                department=department_type,
-                message=f"{department_type} agent cycle completed",
-                data={"model": model},
-            )
+            try:
+                session_output = spawn_result.get("output", "") or spawn_result.get("result", "")
+                judge_result = await _run_quality_gate(
+                    slug=company.slug,
+                    company_name=company.name,
+                    company_id=company_id,
+                    department_type=department_type,
+                    task_description=task,
+                    session_output=str(session_output),
+                )
+            except Exception as e:
+                logger.warning(f"[{company.slug}/{department_type}] Quality gate error, defaulting to pass: {e}")
+                publish_sync(
+                    company_id, EventType.agent_completed,
+                    department=department_type,
+                    message=f"{department_type} agent cycle completed (judge skipped)",
+                    data={"model": model},
+                )
         else:
             publish_sync(
                 company_id, EventType.agent_failed,
@@ -370,6 +566,8 @@ async def _execute_department_cycle(
             },
             **spawn_result,
         }
+        if judge_result:
+            result["judge"] = judge_result
         if deploy_result:
             result["deploy"] = deploy_result
         return result

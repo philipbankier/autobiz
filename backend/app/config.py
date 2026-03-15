@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     VERCEL_TOKEN: str = ""
     LATE_API_KEY: str = ""
     RESEND_API_KEY: str = ""
+    ANTHROPIC_API_KEY: str = ""
     OPENCLAW_GATEWAY_URL: str = "http://127.0.0.1:18789"
     OPENCLAW_GATEWAY_TOKEN: str = ""
 

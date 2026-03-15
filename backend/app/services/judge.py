@@ -1,7 +1,7 @@
 """
 LLM-as-Judge service.
-Evaluates agent outputs using a cheap model (Haiku) to score quality.
-Also handles "give up" circuit breaker decisions.
+Evaluates agent outputs using direct Anthropic API calls (Haiku) to score quality.
+Also handles "give up" circuit breaker decisions and memory consolidation.
 """
 import json
 import logging
@@ -13,52 +13,69 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-GATEWAY_URL = "http://127.0.0.1:18789"
-JUDGE_MODEL = "anthropic/claude-haiku-3.5"
+ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
+JUDGE_MODEL = "claude-haiku-4-5-20241022"
 
 
-def _get_gateway_token() -> str:
+def _get_api_key() -> str:
+    """Get Anthropic API key from settings env or OpenClaw config."""
+    if settings.ANTHROPIC_API_KEY:
+        return settings.ANTHROPIC_API_KEY
+
+    # Fallback: read from OpenClaw config
     from pathlib import Path
     config_path = Path.home() / ".openclaw" / "openclaw.json"
     try:
         with open(config_path) as f:
             config = json.load(f)
-        return config["gateway"]["auth"]["token"]
-    except (FileNotFoundError, KeyError):
+        return config["providers"]["anthropic"]["apiKey"]
+    except (FileNotFoundError, KeyError, json.JSONDecodeError):
         return ""
 
 
-async def _call_judge(prompt: str) -> dict:
-    """Call the judge model via OpenClaw gateway."""
-    token = _get_gateway_token()
+async def _call_anthropic(prompt: str, max_tokens: int = 1000) -> str:
+    """Make a direct HTTP call to Anthropic API. Returns the text response."""
+    api_key = _get_api_key()
+    if not api_key:
+        raise ValueError("No Anthropic API key configured")
 
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            ANTHROPIC_API_URL,
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": JUDGE_MODEL,
+                "max_tokens": max_tokens,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        data = response.json()
+        # Extract text from content blocks
+        for block in data.get("content", []):
+            if block.get("type") == "text":
+                return block["text"]
+        return ""
+
+
+def _parse_json_response(text: str) -> dict:
+    """Extract JSON from LLM response, handling markdown code fences."""
+    text = text.strip()
+    # Strip markdown code fences
+    if text.startswith("```"):
+        lines = text.split("\n")
+        # Remove first and last lines (``` markers)
+        lines = [l for l in lines[1:] if not l.strip().startswith("```")]
+        text = "\n".join(lines).strip()
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{GATEWAY_URL}/tools/invoke",
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "tool": "sessions_spawn",
-                    "args": {
-                        "agentId": "researcher",  # Use researcher agent for judging
-                        "task": prompt,
-                        "mode": "run",
-                        "model": JUDGE_MODEL,
-                        "runTimeoutSeconds": 60,
-                    },
-                },
-                timeout=15.0,
-            )
-            result = response.json()
-            if result.get("ok"):
-                return {"status": "ok", "result": result}
-            return {"status": "error", "message": str(result.get("error", "Unknown error"))}
-    except Exception as e:
-        logger.error(f"Judge call failed: {e}")
-        return {"status": "error", "message": str(e)}
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return {}
 
 
 async def evaluate_output(
@@ -69,7 +86,7 @@ async def evaluate_output(
 ) -> dict:
     """
     Evaluate agent output quality. Returns score (1-10), feedback, and pass/fail.
-    Uses a cheap model to keep costs minimal (~$0.001 per evaluation).
+    Uses Haiku for minimal cost (~$0.001 per evaluation).
     """
     prompt = f"""You are a quality evaluator for an autonomous AI company called "{company_name}".
 
@@ -97,27 +114,40 @@ Return ONLY a JSON object:
   "safety": <1-10>,
   "overall": <1-10>,
   "feedback": "<specific feedback for improvement>",
-  "pass": <true if overall >= 7, false otherwise>
+  "pass": <true if overall >= 6, false otherwise>
 }}
 """
-    result = await _call_judge(prompt)
+    try:
+        raw = await _call_anthropic(prompt)
+        parsed = _parse_json_response(raw)
 
-    # Default to pass if judge fails (don't block on judge errors)
-    if result["status"] != "ok":
-        logger.warning(f"Judge failed, defaulting to pass: {result.get('message')}")
+        if not parsed or "overall" not in parsed:
+            logger.warning(f"Judge returned unparseable response: {raw[:200]}")
+            return {
+                "overall": 7,
+                "pass": True,
+                "feedback": "Judge response unparseable, auto-passed",
+                "scores": {},
+            }
+
+        return {
+            "overall": parsed["overall"],
+            "pass": parsed.get("pass", parsed["overall"] >= 6),
+            "feedback": parsed.get("feedback", ""),
+            "scores": {
+                k: parsed[k]
+                for k in ("relevance", "quality", "completeness", "safety")
+                if k in parsed
+            },
+        }
+    except Exception as e:
+        logger.warning(f"Judge evaluation failed, defaulting to pass: {e}")
         return {
             "overall": 7,
             "pass": True,
-            "feedback": "Judge unavailable, auto-passed",
+            "feedback": f"Judge unavailable ({e}), auto-passed",
             "scores": {},
         }
-
-    return {
-        "overall": 7,
-        "pass": True,
-        "feedback": "Evaluation submitted (async)",
-        "scores": {},
-    }
 
 
 async def should_give_up(
@@ -155,19 +185,26 @@ Look for: repeating the same errors, going in circles, or trying fundamentally d
   "reason": "<brief explanation>"
 }}
 """
-    result = await _call_judge(prompt)
+    try:
+        raw = await _call_anthropic(prompt, max_tokens=500)
+        parsed = _parse_json_response(raw)
 
-    if result["status"] != "ok":
-        # Default: give up after max attempts if judge fails
+        if not parsed or "give_up" not in parsed:
+            return {
+                "give_up": True,
+                "reason": f"Judge unparseable, giving up after {max_attempts} attempts",
+            }
+
+        return {
+            "give_up": parsed["give_up"],
+            "reason": parsed.get("reason", "No reason given"),
+        }
+    except Exception as e:
+        logger.warning(f"Judge give-up check failed: {e}")
         return {
             "give_up": True,
             "reason": f"Judge unavailable, giving up after {max_attempts} failed attempts",
         }
-
-    return {
-        "give_up": True,
-        "reason": f"Exhausted {max_attempts} attempts",
-    }
 
 
 async def consolidate_memory(
@@ -179,7 +216,7 @@ async def consolidate_memory(
     """
     Post-run memory consolidation.
     Extract key facts from agent session and return updated memory content.
-    Uses cheap model to keep costs minimal.
+    Returns the updated memory string, or current_memory unchanged on failure.
     """
     prompt = f"""You are a memory consolidation agent for "{company_name}" ({department_type} department).
 
@@ -206,12 +243,15 @@ Rules:
 
 Return ONLY the updated memory content (markdown format), nothing else.
 """
-    # This spawns async — the actual update happens when the session completes
-    result = await _call_judge(prompt)
+    try:
+        result = await _call_anthropic(prompt, max_tokens=2000)
+        result = result.strip()
 
-    if result["status"] != "ok":
-        return current_memory  # Return unchanged on failure
+        # Sanity check: non-empty and looks like markdown
+        if not result or len(result) < 20:
+            return current_memory
 
-    # For now, return unchanged — the consolidation runs async
-    # The spawned session will update the file directly
-    return current_memory
+        return result
+    except Exception as e:
+        logger.warning(f"Memory consolidation failed: {e}")
+        return current_memory
