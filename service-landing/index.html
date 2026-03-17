@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Business Launch — Your Idea → Live Business in 48 Hours</title>
+  <meta name="description" content="I use AI agents to turn your business idea into a live product with payments, branding, and marketing — in 48 hours. Starting at $299.">
+  <style>
+    :root {
+      --bg: #0a0a0a;
+      --surface: #141414;
+      --border: #222;
+      --text: #e5e5e5;
+      --muted: #888;
+      --accent: #6366f1;
+      --accent-hover: #818cf8;
+      --green: #22c55e;
+      --orange: #f59e0b;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    .container { max-width: 800px; margin: 0 auto; padding: 0 24px; }
+
+    /* Nav */
+    nav {
+      padding: 20px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    nav .container {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .logo { font-size: 1.25rem; font-weight: 700; color: var(--text); text-decoration: none; }
+    .logo span { color: var(--accent); }
+    .nav-cta {
+      background: var(--accent);
+      color: white;
+      padding: 8px 20px;
+      border-radius: 8px;
+      text-decoration: none;
+      font-size: 0.9rem;
+      font-weight: 600;
+      transition: background 0.2s;
+    }
+    .nav-cta:hover { background: var(--accent-hover); }
+
+    /* Hero */
+    .hero {
+      padding: 80px 0 60px;
+      text-align: center;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(99,102,241,0.15);
+      color: var(--accent);
+      padding: 6px 16px;
+      border-radius: 100px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-bottom: 24px;
+      border: 1px solid rgba(99,102,241,0.3);
+    }
+    h1 {
+      font-size: clamp(2rem, 5vw, 3.2rem);
+      font-weight: 800;
+      line-height: 1.15;
+      margin-bottom: 20px;
+      letter-spacing: -0.03em;
+    }
+    h1 em {
+      font-style: normal;
+      background: linear-gradient(135deg, var(--accent), #a78bfa);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .hero p {
+      font-size: 1.15rem;
+      color: var(--muted);
+      max-width: 600px;
+      margin: 0 auto 40px;
+    }
+    .hero-ctas {
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: white;
+      padding: 14px 32px;
+      border-radius: 10px;
+      text-decoration: none;
+      font-size: 1.05rem;
+      font-weight: 700;
+      transition: all 0.2s;
+      border: none;
+      cursor: pointer;
+    }
+    .btn-primary:hover { background: var(--accent-hover); transform: translateY(-1px); }
+    .btn-secondary {
+      background: transparent;
+      color: var(--text);
+      padding: 14px 32px;
+      border-radius: 10px;
+      text-decoration: none;
+      font-size: 1.05rem;
+      font-weight: 600;
+      border: 1px solid var(--border);
+      transition: all 0.2s;
+    }
+    .btn-secondary:hover { border-color: var(--muted); }
+
+    /* Social proof */
+    .proof {
+      padding: 40px 0;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+    .proof-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 32px;
+      text-align: center;
+    }
+    .proof-stat { font-size: 2rem; font-weight: 800; color: var(--accent); }
+    .proof-label { font-size: 0.9rem; color: var(--muted); margin-top: 4px; }
+
+    /* How it works */
+    .section { padding: 80px 0; }
+    .section-title {
+      font-size: 1.8rem;
+      font-weight: 700;
+      text-align: center;
+      margin-bottom: 48px;
+      letter-spacing: -0.02em;
+    }
+    .steps {
+      display: grid;
+      gap: 24px;
+    }
+    .step {
+      display: grid;
+      grid-template-columns: 48px 1fr;
+      gap: 20px;
+      align-items: start;
+      padding: 24px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+    .step-num {
+      width: 48px;
+      height: 48px;
+      background: rgba(99,102,241,0.15);
+      color: var(--accent);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 1.2rem;
+    }
+    .step h3 { font-size: 1.1rem; font-weight: 700; margin-bottom: 6px; }
+    .step p { color: var(--muted); font-size: 0.95rem; }
+
+    /* Deliverables */
+    .deliverables-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+    }
+    .deliverable {
+      padding: 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+    .deliverable .icon { font-size: 1.5rem; margin-bottom: 8px; }
+    .deliverable h3 { font-size: 1rem; font-weight: 600; margin-bottom: 4px; }
+    .deliverable p { color: var(--muted); font-size: 0.85rem; }
+
+    /* Pricing */
+    .pricing-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 24px;
+      max-width: 720px;
+      margin: 0 auto;
+    }
+    .price-card {
+      padding: 32px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      position: relative;
+    }
+    .price-card.featured {
+      border-color: var(--accent);
+      box-shadow: 0 0 40px rgba(99,102,241,0.1);
+    }
+    .popular-badge {
+      position: absolute;
+      top: -12px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--accent);
+      color: white;
+      padding: 4px 16px;
+      border-radius: 100px;
+      font-size: 0.8rem;
+      font-weight: 700;
+    }
+    .price-card h3 { font-size: 1.2rem; font-weight: 700; margin-bottom: 8px; }
+    .price-card .price {
+      font-size: 2.5rem;
+      font-weight: 800;
+      margin-bottom: 4px;
+    }
+    .price-card .price-note { color: var(--muted); font-size: 0.85rem; margin-bottom: 24px; }
+    .price-card ul {
+      list-style: none;
+      margin-bottom: 28px;
+    }
+    .price-card li {
+      padding: 8px 0;
+      font-size: 0.95rem;
+      color: var(--muted);
+      display: flex;
+      gap: 10px;
+      align-items: baseline;
+    }
+    .price-card li::before {
+      content: "✓";
+      color: var(--green);
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .price-card .btn-primary { width: 100%; text-align: center; display: block; }
+
+    /* FAQ */
+    .faq { max-width: 600px; margin: 0 auto; }
+    .faq-item {
+      border-bottom: 1px solid var(--border);
+      padding: 20px 0;
+    }
+    .faq-item summary {
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 1.05rem;
+      list-style: none;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .faq-item summary::after { content: "+"; font-size: 1.3rem; color: var(--muted); }
+    .faq-item[open] summary::after { content: "−"; }
+    .faq-item p {
+      color: var(--muted);
+      margin-top: 12px;
+      font-size: 0.95rem;
+    }
+
+    /* CTA */
+    .final-cta {
+      text-align: center;
+      padding: 80px 0;
+      border-top: 1px solid var(--border);
+    }
+    .final-cta h2 {
+      font-size: 2rem;
+      font-weight: 800;
+      margin-bottom: 16px;
+    }
+    .final-cta p {
+      color: var(--muted);
+      margin-bottom: 32px;
+      font-size: 1.1rem;
+    }
+
+    /* Footer */
+    footer {
+      padding: 40px 0;
+      border-top: 1px solid var(--border);
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+
+    @media (max-width: 600px) {
+      .proof-grid { grid-template-columns: 1fr; gap: 20px; }
+      .pricing-grid { grid-template-columns: 1fr; }
+      .hero { padding: 48px 0 40px; }
+    }
+  </style>
+</head>
+<body>
+  <nav>
+    <div class="container">
+      <a href="#" class="logo">auto<span>biz</span></a>
+      <a href="#pricing" class="nav-cta">Get Started</a>
+    </div>
+  </nav>
+
+  <section class="hero">
+    <div class="container">
+      <div class="badge">🤖 Powered by AI Agents</div>
+      <h1>Your idea → <em>live business</em><br>in 48 hours</h1>
+      <p>I use a team of AI agents to build your product, wire up payments, create your brand, and launch your online business. You bring the idea — I handle everything else.</p>
+      <div class="hero-ctas">
+        <a href="#pricing" class="btn-primary">See Packages →</a>
+        <a href="#how" class="btn-secondary">How It Works</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="proof">
+    <div class="container">
+      <div class="proof-grid">
+        <div>
+          <div class="proof-stat">48h</div>
+          <div class="proof-label">Idea to live product</div>
+        </div>
+        <div>
+          <div class="proof-stat">6</div>
+          <div class="proof-label">AI agents working for you</div>
+        </div>
+        <div>
+          <div class="proof-stat">$0</div>
+          <div class="proof-label">Ongoing hosting costs</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="how">
+    <div class="container">
+      <h2 class="section-title">How It Works</h2>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div>
+            <h3>Tell me your idea</h3>
+            <p>Describe your business concept in plain English. "An AI tool that writes product descriptions" or "A landing page builder for freelancers" — anything goes.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div>
+            <h3>AI agents build it</h3>
+            <p>A CEO agent creates the business plan. A developer agent writes the code. A marketing agent creates your brand. A finance agent wires payments. All working in parallel.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div>
+            <h3>Review & launch</h3>
+            <p>You get a live site with working payments, professional branding, and your first marketing assets — ready to share and start selling. All within 48 hours.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" style="padding-top:0;">
+    <div class="container">
+      <h2 class="section-title">What You Get</h2>
+      <div class="deliverables-grid">
+        <div class="deliverable">
+          <div class="icon">🌐</div>
+          <h3>Live Website</h3>
+          <p>Professional site deployed on your own domain or a free subdomain. Mobile-responsive, fast, SEO-ready.</p>
+        </div>
+        <div class="deliverable">
+          <div class="icon">💳</div>
+          <h3>Stripe Payments</h3>
+          <p>Accept payments day one. Products, pricing, and checkout — all configured and tested.</p>
+        </div>
+        <div class="deliverable">
+          <div class="icon">🎨</div>
+          <h3>Brand Identity</h3>
+          <p>Name, logo concept, color palette, and copy that matches your market and positioning.</p>
+        </div>
+        <div class="deliverable">
+          <div class="icon">📱</div>
+          <h3>Social Presence</h3>
+          <p>Launch-ready social profiles with your first posts and content calendar. (Launch package)</p>
+        </div>
+        <div class="deliverable">
+          <div class="icon">📧</div>
+          <h3>Email Setup</h3>
+          <p>Professional email with welcome sequences and lead capture. (Launch package)</p>
+        </div>
+        <div class="deliverable">
+          <div class="icon">📊</div>
+          <h3>Business Plan</h3>
+          <p>AI-generated strategy doc: target audience, pricing, competitive analysis, go-to-market plan.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="pricing" style="padding-top: 20px;">
+    <div class="container">
+      <h2 class="section-title">Simple Pricing</h2>
+      <div class="pricing-grid">
+        <div class="price-card">
+          <h3>Starter</h3>
+          <div class="price">$299</div>
+          <div class="price-note">One-time payment</div>
+          <ul>
+            <li>Professional landing page</li>
+            <li>Stripe payment integration</li>
+            <li>Brand identity (name, colors, copy)</li>
+            <li>Business plan & strategy doc</li>
+            <li>Deployed on free subdomain</li>
+            <li>Delivered in 48 hours</li>
+          </ul>
+          <a href="https://buy.stripe.com/test_28E7sL3PM1Ljbx1fnw2B200" class="btn-primary">Get Started →</a>
+        </div>
+        <div class="price-card featured">
+          <div class="popular-badge">MOST POPULAR</div>
+          <h3>Launch</h3>
+          <div class="price">$499</div>
+          <div class="price-note">One-time payment</div>
+          <ul>
+            <li>Everything in Starter</li>
+            <li>Social media profiles & first posts</li>
+            <li>Email setup with welcome sequence</li>
+            <li>Custom domain configuration</li>
+            <li>1 week of AI agent operations</li>
+            <li>Priority support via chat</li>
+          </ul>
+          <a href="https://buy.stripe.com/test_14A8wPcmidu1asXejs2B201" class="btn-primary">Launch My Business →</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" style="padding-top: 20px;">
+    <div class="container">
+      <h2 class="section-title">Questions</h2>
+      <div class="faq">
+        <details class="faq-item">
+          <summary>What kind of businesses can you launch?</summary>
+          <p>Micro-SaaS products, digital tools, content platforms, service businesses, marketplaces — anything that can operate online. The AI agents handle code, design, payments, and marketing. If you can describe it, we can build it.</p>
+        </details>
+        <details class="faq-item">
+          <summary>How does the 48-hour delivery work?</summary>
+          <p>Once you pay and describe your idea (a short form), a team of 6 AI agents starts working immediately. A CEO agent creates the business strategy, a developer builds the product, a marketing agent creates your brand assets. You'll get updates as they work, and a review call before we go live.</p>
+        </details>
+        <details class="faq-item">
+          <summary>Do I own everything?</summary>
+          <p>100%. The code, the domain, the Stripe account, the content — it's all yours. We hand over complete ownership. No vendor lock-in, no ongoing fees unless you want continued AI agent operations.</p>
+        </details>
+        <details class="faq-item">
+          <summary>What if I don't like what the agents built?</summary>
+          <p>You get to review everything before launch. We'll iterate on feedback until you're happy. If we genuinely can't deliver what you need, full refund — no questions asked.</p>
+        </details>
+        <details class="faq-item">
+          <summary>What's "1 week of AI agent operations"?</summary>
+          <p>After launch, AI agents continue working: publishing social media content, responding to inquiries, monitoring analytics, and suggesting improvements. It's like having a virtual team running your business for a week while you focus on customers.</p>
+        </details>
+        <details class="faq-item">
+          <summary>What tech stack do you use?</summary>
+          <p>Modern web technologies: React/Next.js frontend, deployed on Vercel (fast, free hosting). Stripe for payments. Professional-grade code that you can extend or hand off to any developer later.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <section class="final-cta">
+    <div class="container">
+      <h2>Ready to launch?</h2>
+      <p>Most people spend months building. You could be live in 48 hours.</p>
+      <a href="#pricing" class="btn-primary">Get Started — $299 →</a>
+    </div>
+  </section>
+
+  <footer>
+    <div class="container">
+      <p>© 2026 AutoBiz. Built with AI agents.</p>
+    </div>
+  </footer>
+</body>
+</html>
