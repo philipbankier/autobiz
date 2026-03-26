@@ -18,7 +18,8 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-COMPANIES_DIR = Path("/home/philip/TinkerLab/autobiz/companies")
+import os as _os
+COMPANIES_DIR = Path(_os.environ.get("COMPANIES_DIR", "/app/companies"))
 
 # Twitter API v2 endpoints
 TWITTER_TWEET_URL = "https://api.twitter.com/2/tweets"

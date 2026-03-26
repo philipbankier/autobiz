@@ -57,3 +57,6 @@ __pycache__/
 # Node
 node_modules/
 .next/
+
+# All company workspace data (generated at runtime)
+companies/*/

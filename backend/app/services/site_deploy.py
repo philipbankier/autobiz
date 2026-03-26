@@ -4,6 +4,7 @@ Manages generated business websites — local file serving + Vercel deployment v
 Flow: copy site/ files into code/ → git commit → git push → Vercel auto-deploys.
 """
 import logging
+import os
 import shutil
 from pathlib import Path
 
@@ -14,8 +15,8 @@ from app.services.git_service import git_commit, git_push, git_status, git_init,
 
 logger = logging.getLogger(__name__)
 
-COMPANIES_DIR = Path("/home/philip/TinkerLab/autobiz/companies")
-SITES_DIR = Path("/home/philip/TinkerLab/autobiz/sites")  # Served by nginx/caddy
+COMPANIES_DIR = Path(os.environ.get("COMPANIES_DIR", "/app/companies"))
+SITES_DIR = Path(os.environ.get("SITES_DIR", "/app/sites"))  # Served by nginx/caddy
 
 
 def get_site_dir(company_slug: str) -> Path:

@@ -11,6 +11,7 @@ The agent logic doesn't care how it was triggered.
 import asyncio
 import json
 import logging
+import os
 import uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -28,8 +29,7 @@ from app.models.department import Department, DepartmentType, DepartmentStatus
 
 logger = logging.getLogger(__name__)
 
-GATEWAY_URL = "http://127.0.0.1:18789"
-COMPANIES_DIR = Path("/home/philip/TinkerLab/autobiz/companies")
+COMPANIES_DIR = Path(os.environ.get("COMPANIES_DIR", "/app/companies"))
 
 # Schedule config: how often each department type should run
 DEFAULT_SCHEDULES = {
@@ -60,14 +60,35 @@ DEFAULT_SCHEDULES = {
 }
 
 
-def _get_gateway_token() -> str:
-    config_path = Path.home() / ".openclaw" / "openclaw.json"
-    try:
-        with open(config_path) as f:
-            config = json.load(f)
-        return config["gateway"]["auth"]["token"]
-    except (FileNotFoundError, KeyError):
-        return ""
+def _get_cron_proxy_url() -> str:
+    """
+    Return the base URL for the OpenClaw cron proxy.
+    The cron proxy is a Docker sidecar that wraps openclaw CLI cron commands.
+    OPENCLAW_GATEWAY_URL is set to http://cron-proxy:18799 inside Docker.
+    """
+    gateway_url = settings.OPENCLAW_GATEWAY_URL
+    # The gateway URL in Docker points directly to the cron proxy
+    # Ensure it's http:// (not ws://)
+    if gateway_url.startswith("ws://"):
+        gateway_url = "http://" + gateway_url[5:]
+    elif gateway_url.startswith("wss://"):
+        gateway_url = "https://" + gateway_url[6:]
+    return gateway_url.rstrip("/")
+
+
+async def _cron_proxy_request(path: str, body: dict) -> dict:
+    """
+    Send a request to the cron proxy HTTP server.
+    The proxy wraps openclaw CLI cron commands and exposes them via simple HTTP.
+    """
+    base_url = _get_cron_proxy_url()
+    url = f"{base_url}{path}"
+    headers = {"Content-Type": "application/json"}
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(url, json=body, headers=headers)
+        resp.raise_for_status()
+        return resp.json()
 
 
 # ──────────────────────────────────────────────
@@ -77,13 +98,13 @@ def _get_gateway_token() -> str:
 async def register_company_cron_jobs(company_id: str, slug: str) -> dict:
     """
     Register OpenClaw cron jobs for a company's department cycles.
-    Uses the openclaw CLI which is the supported interface for cron management.
+    Uses the cron proxy HTTP server which wraps openclaw CLI calls.
     """
     results = {}
     workspace = str(COMPANIES_DIR / slug)
 
     for dept_type, schedule in DEFAULT_SCHEDULES.items():
-        job_id = f"autobiz-{slug}-{dept_type}"
+        job_name = f"autobiz-{slug}-{dept_type}"
 
         # Build the cron job task message
         task_message = (
@@ -97,37 +118,33 @@ async def register_company_cron_jobs(company_id: str, slug: str) -> dict:
         )
 
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "openclaw", "cron", "add",
-                "--name", f"autobiz-{slug}-{dept_type}",
-                "--cron", schedule["cron"],
-                "--tz", "America/New_York",
-                "--session", "isolated",
-                "--message", task_message,
-                "--no-deliver",
-                "--json",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
-            output = stdout.decode() + stderr.decode()
-
-            if proc.returncode == 0:
-                # Parse job ID from JSON output
-                actual_job_id = job_id
-                try:
-                    result_data = json.loads(stdout.decode())
-                    actual_job_id = result_data.get("id") or result_data.get("jobId") or job_id
-                except (json.JSONDecodeError, KeyError):
-                    pass
-                results[dept_type] = {"status": "registered", "job_id": actual_job_id, "expr": schedule["cron"]}
+            response = await _cron_proxy_request("/cron/add", {
+                "name": job_name,
+                "cron": schedule["cron"],
+                "tz": "America/New_York",
+                "session": "isolated",
+                "message": task_message,
+            })
+            if response.get("ok"):
+                result_data = response.get("result", {})
+                actual_job_id = (
+                    result_data.get("jobId")
+                    or result_data.get("id")
+                    or job_name
+                )
+                results[dept_type] = {
+                    "status": "registered",
+                    "job_id": actual_job_id,
+                    "expr": schedule["cron"],
+                }
                 logger.info(f"Registered cron job: {actual_job_id} ({schedule['cron']})")
             else:
-                results[dept_type] = {"status": "error", "message": output.strip()}
-                logger.warning(f"Failed to register cron job {job_id}: {output}")
+                error_msg = response.get("error", str(response))
+                results[dept_type] = {"status": "error", "message": error_msg}
+                logger.warning(f"Failed to register cron job {job_name}: {error_msg}")
         except Exception as e:
             results[dept_type] = {"status": "error", "message": str(e)}
-            logger.error(f"Cron registration error for {job_id}: {e}")
+            logger.error(f"Cron registration error for {job_name}: {e}")
 
     return results
 
@@ -144,18 +161,13 @@ async def unregister_company_cron_jobs(slug: str) -> dict:
         return {dept: "not_found" for dept in DEFAULT_SCHEDULES}
 
     for job in all_jobs:
-        job_id = job.get("id") or job.get("jobId", "")
+        job_id = job.get("jobId") or job.get("id", "")
         job_name = job.get("name", "")
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "openclaw", "cron", "remove", job_id,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10.0)
+            response = await _cron_proxy_request("/cron/remove", {"jobId": job_id})
             # Extract dept type from name (autobiz-{slug}-{dept})
-            dept = job_name.replace(prefix, "").replace(f"autobiz-{slug}-", "") if prefix in job_name else job_name
-            results[dept or job_id] = "removed" if proc.returncode == 0 else "error"
+            dept = job_name.replace(prefix, "") if prefix in job_name else job_name
+            results[dept or job_id] = "removed" if response.get("ok") else "error"
         except Exception as e:
             results[job_id] = f"error: {e}"
 
@@ -172,17 +184,11 @@ async def list_company_cron_jobs(slug: str) -> list:
     prefix = f"autobiz-{slug}-"
 
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "openclaw", "cron", "list", "--json",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10.0)
-
-        if proc.returncode != 0:
+        response = await _cron_proxy_request("/cron/list", {})
+        if not response.get("ok"):
             return []
 
-        data = json.loads(stdout.decode())
+        data = response.get("result", {})
         # Filter to this company's jobs by name prefix
         jobs = []
         if isinstance(data, list):

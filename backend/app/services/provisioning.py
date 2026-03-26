@@ -10,6 +10,7 @@ Each company gets isolated resources. Agents work within these boundaries.
 """
 import json
 import logging
+import os
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -20,7 +21,7 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-COMPANIES_DIR = Path("/home/philip/TinkerLab/autobiz/companies")
+COMPANIES_DIR = Path(os.environ.get("COMPANIES_DIR", "/app/companies"))
 GITHUB_ORG = "autobiz-companies"  # or user's own account
 
 
@@ -40,6 +41,20 @@ class CompanyProvisioner:
         self.workspace = COMPANIES_DIR / slug
         self.results: dict = {}
 
+    async def _emit_event(self, event_type: str, message: str, data: dict | None = None):
+        """Emit an SSE event for real-time frontend progress tracking."""
+        try:
+            from app.services.event_bus import publish
+            await publish(
+                company_id=self.company_id,
+                event_type=event_type,
+                department=None,
+                message=message,
+                data=data,
+            )
+        except Exception as e:
+            logger.warning(f"[{self.slug}] Failed to emit event: {e}")
+
     async def provision_all(self) -> dict:
         """
         Run all provisioning steps. Each step is independent and logs its own
@@ -54,14 +69,30 @@ class CompanyProvisioner:
             ("scheduler", self.provision_scheduler),
         ]
 
+        # Map step names to SSE event types the frontend expects
+        step_events = {
+            "workspace": ("company.provisioned", "Company workspace created"),
+            "github": ("git.repo_created", "GitHub repository created"),
+            "vercel": ("deploy.linked", "Vercel project linked"),
+            "stripe": ("company.provisioned", "Stripe account created"),
+            "email": ("company.provisioned", "Email configured"),
+            "scheduler": ("company.provisioned", "Scheduler configured"),
+        }
+
         for step_name, step_fn in steps:
             try:
                 result = await step_fn()
                 self.results[step_name] = {"status": "ok", **result}
                 logger.info(f"[{self.slug}] Provisioned {step_name}: {result}")
+                # Emit SSE event for frontend progress tracking
+                event_type, event_msg = step_events.get(step_name, ("company.provisioned", step_name))
+                await self._emit_event(event_type, event_msg, result)
             except Exception as e:
                 self.results[step_name] = {"status": "error", "message": str(e)}
                 logger.error(f"[{self.slug}] Failed to provision {step_name}: {e}")
+
+        # Emit completion event
+        await self._emit_event("onboard.completed", "Company setup complete")
 
         return self.results
 
@@ -285,6 +316,15 @@ planning
         if not stripe_key:
             raise ProvisioningError("STRIPE_SECRET_KEY not configured")
 
+        # Issue 9: Stripe test mode guard
+        test_mode = stripe_key.startswith("sk_test_")
+        if test_mode:
+            logger.warning(
+                f"[{self.slug}] STRIPE TEST MODE: STRIPE_SECRET_KEY starts with 'sk_test_'. "
+                "Stripe Connect account will be created in TEST mode. "
+                "No real money will be processed."
+            )
+
         async with httpx.AsyncClient() as client:
             # Create a Connected Account (Express)
             resp = await client.post(
@@ -333,23 +373,23 @@ planning
         return {
             "account_id": account_data["id"],
             "onboarding_url": onboard_url,
+            "test_mode": test_mode,
         }
 
     async def provision_scheduler(self) -> dict:
-        """Register OpenClaw cron jobs for automated department cycles."""
-        from app.services.scheduler import register_company_cron_jobs
-
-        results = await register_company_cron_jobs(self.company_id, self.slug)
-        registered = sum(1 for r in results.values() if r.get("status") == "registered")
-        total = len(results)
-
-        if registered == 0:
-            raise ProvisioningError(f"No cron jobs registered (0/{total})")
-
+        """Register Celery Beat periodic tasks for automated department cycles.
+        
+        Uses Celery Beat (running inside Docker) instead of OpenClaw cron (which
+        is only accessible from the host). This keeps everything self-contained
+        within the Docker network.
+        """
+        from app.services.agent_scheduler import schedule_company_cycles
+        result = schedule_company_cycles(self.company_id, slug=self.slug)
+        logger.info(f"[{self.slug}] Celery Beat schedules registered: {result}")
         return {
-            "registered": registered,
-            "total": total,
-            "jobs": results,
+            "status": "registered",
+            "note": "Celery Beat periodic tasks registered for all departments",
+            "schedules": result,
         }
 
     async def provision_email(self) -> dict:

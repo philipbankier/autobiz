@@ -13,38 +13,35 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
-JUDGE_MODEL = "claude-haiku-4-5-20241022"
+import os as _os_judge
+JUDGE_MODEL = "claude-haiku-4-5"
+
+# Use local OpenAI-compat proxy if available, otherwise fall back to Anthropic API
+_ANTHROPIC_API_BASE = (
+    _os_judge.environ.get("ANTHROPIC_API_BASE")
+    or getattr(settings, "ANTHROPIC_API_BASE", None)
+    or "http://172.24.0.1:8322"  # CC-Bridge: OpenAI-compat proxy via Claude Max
+)
 
 
 def _get_api_key() -> str:
-    """Get Anthropic API key from settings env or OpenClaw config."""
+    """Get API key — returns dummy for local proxy, real key for Anthropic API."""
     if settings.ANTHROPIC_API_KEY:
         return settings.ANTHROPIC_API_KEY
-
-    # Fallback: read from OpenClaw config
-    from pathlib import Path
-    config_path = Path.home() / ".openclaw" / "openclaw.json"
-    try:
-        with open(config_path) as f:
-            config = json.load(f)
-        return config["providers"]["anthropic"]["apiKey"]
-    except (FileNotFoundError, KeyError, json.JSONDecodeError):
-        return ""
+    # Local proxy doesn't need a real key
+    return "dummy"
 
 
 async def _call_anthropic(prompt: str, max_tokens: int = 1000) -> str:
-    """Make a direct HTTP call to Anthropic API. Returns the text response."""
+    """Make an LLM call via local OpenAI-compat proxy or Anthropic API."""
     api_key = _get_api_key()
-    if not api_key:
-        raise ValueError("No Anthropic API key configured")
+    base_url = _ANTHROPIC_API_BASE
 
     async with httpx.AsyncClient() as client:
         response = await client.post(
-            ANTHROPIC_API_URL,
+            f"{base_url}/v1/chat/completions",
             headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
+                "Authorization": f"Bearer {api_key}",
                 "content-type": "application/json",
             },
             json={
@@ -56,11 +53,8 @@ async def _call_anthropic(prompt: str, max_tokens: int = 1000) -> str:
         )
         response.raise_for_status()
         data = response.json()
-        # Extract text from content blocks
-        for block in data.get("content", []):
-            if block.get("type") == "text":
-                return block["text"]
-        return ""
+        # OpenAI format: choices[0].message.content
+        return data.get("choices", [{}])[0].get("message", {}).get("content", "")
 
 
 def _parse_json_response(text: str) -> dict:

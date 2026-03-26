@@ -15,10 +15,22 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# CORS
+# CORS — allow frontend origins (wildcards require allow_credentials=False for most browsers,
+# but EventSource doesn't send credentials anyway; JWT is passed as a query param).
+# We use explicit origins so allow_credentials=True works correctly with fetch() calls.
+ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://localhost:3002",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+    "http://127.0.0.1:3002",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r"https://.*\.autobiz\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

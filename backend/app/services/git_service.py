@@ -4,13 +4,14 @@ Async wrappers around git CLI for commit, push, and status operations.
 """
 import asyncio
 import logging
+import os
 from pathlib import Path
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-COMPANIES_DIR = Path("/home/philip/TinkerLab/autobiz/companies")
+COMPANIES_DIR = Path(os.environ.get("COMPANIES_DIR", "/app/companies"))
 
 
 def _code_dir(slug: str) -> Path:

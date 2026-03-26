@@ -37,7 +37,7 @@ async def _find_company_by_slug(slug: str) -> Optional[Company]:
 async def _find_company_by_stripe_account(account_id: str) -> Optional[dict]:
     """Find company by Stripe Connect account ID from .env file."""
     from pathlib import Path
-    companies_dir = Path("/home/philip/TinkerLab/autobiz/companies")
+    import os as _osx; companies_dir = Path(_osx.environ.get("COMPANIES_DIR", "/app/companies"))
     
     for company_dir in companies_dir.iterdir():
         if not company_dir.is_dir():

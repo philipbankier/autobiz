@@ -24,8 +24,9 @@ from app.services.cost_control import (
 
 logger = logging.getLogger(__name__)
 
-GATEWAY_URL = "http://127.0.0.1:18789"
-COMPANIES_DIR = Path("/home/philip/TinkerLab/autobiz/companies")
+import os as _os
+GATEWAY_URL = _os.environ.get("OPENCLAW_GATEWAY_URL", "http://host.docker.internal:18789")
+COMPANIES_DIR = Path(_os.environ.get("COMPANIES_DIR", "/app/companies"))
 
 # Map AutoBiz department types to OpenClaw agent IDs
 DEPT_TO_AGENT = {
@@ -254,15 +255,187 @@ Key files (use absolute paths):
 {task_description}
 
 ## Critical Instructions
-1. ALL file operations must use absolute paths starting with {abs_workspace}/
-2. Check {abs_workspace}/STEERING.md first for human overrides
-3. Read your PLAN.md to find the next unchecked task (- [ ])
-4. Execute ONE task only (fresh context pattern — don't try to do everything)
-5. Validate your work before marking complete
-6. Mark the task done: change - [ ] to - [x]
-7. Update {abs_workspace}/departments/{department_type}/MEMORY.md with key learnings
-8. Be concise in your final summary — state what you did and what changed
+1. Check STEERING.md first for human overrides
+2. Read your PLAN.md to find the next unchecked task (- [ ])
+3. Execute ONE task only (fresh context pattern — don't try to do everything)
+4. Validate your work before marking complete
+5. Be concise in your final summary — state what you did and what changed
+
+## OUTPUT FORMAT (MANDATORY)
+You CANNOT write files directly. Instead, output file changes using this exact format:
+
+### File: <relative-path>
+```
+<full file content>
+```
+
+Examples:
+### File: departments/{department_type}/PLAN.md
+```
+# {department_type.upper()} — Task Plan
+
+## Tasks
+- [x] Completed task
+- [ ] Next task: description
+```
+
+### File: COMPANY.md
+```
+(full updated content)
+```
+
+Use relative paths from the company workspace root (e.g., `departments/ceo/PLAN.md`, `COMPANY.md`).
+You MUST use this format for ALL file changes. Any text outside these blocks is treated as commentary only.
 """
+
+
+async def _spawn_via_anthropic(
+    company_slug: str,
+    department_type: str,
+    task_prompt: str,
+    model: str,
+    workspace: Path,
+) -> dict:
+    """
+    Fallback: run the department task directly via Anthropic-compat API.
+    Tries local proxy (ANTHROPIC_API_BASE) first, then direct Anthropic API (ANTHROPIC_API_KEY).
+    Reads and writes files to workspace just like the OpenClaw agent would.
+    """
+    import os as _os2
+    from app.config import settings
+
+    # Map OpenClaw model names to bare model IDs
+    MODEL_MAP = {
+        "anthropic/claude-opus-4-6":    "claude-opus-4-6",
+        "anthropic/claude-sonnet-4-6":  "claude-sonnet-4-6",
+        "anthropic/claude-haiku-3.5":   "claude-haiku-4-5",
+        "anthropic/claude-haiku-3-5":   "claude-haiku-4-5",
+        "claude-opus-4-6":              "claude-opus-4-6",
+        "claude-sonnet-4-6":            "claude-sonnet-4-6",
+        "claude-haiku-3-5":             "claude-haiku-4-5",
+    }
+    api_model = MODEL_MAP.get(model, "claude-sonnet-4-6")
+
+    # Local OpenAI-compat proxy (e.g. claude-openai-adapter)
+    anthropic_base = (
+        _os2.environ.get("ANTHROPIC_API_BASE")
+        or getattr(settings, "ANTHROPIC_API_BASE", None)
+        or "http://172.24.0.1:8322"  # CC-Bridge: OpenAI-compat proxy via Claude Max
+    )
+    anthropic_key = (
+        _os2.environ.get("ANTHROPIC_API_KEY")
+        or getattr(settings, "ANTHROPIC_API_KEY", None)
+        or "dummy"  # local proxy may not need a real key
+    )
+
+    logger.info(
+        f"[{company_slug}/{department_type}] Calling LLM "
+        f"(base={anthropic_base}, model={api_model})"
+    )
+
+    # System prompt for the department role
+    system_prompt = _get_role_description(department_type).strip()
+
+    try:
+        # Try OpenAI-compat format first (claude-openai-adapter uses /v1/chat/completions)
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(
+                f"{anthropic_base}/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {anthropic_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": api_model,
+                    "max_tokens": 4096,
+                    "messages": [
+                        *([{"role": "system", "content": system_prompt}] if system_prompt else []),
+                        {"role": "user", "content": task_prompt},
+                    ],
+                },
+            )
+
+            if resp.status_code == 200:
+                data = resp.json()
+                output = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                _apply_agent_output(output, workspace, department_type)
+                logger.info(f"[{company_slug}/{department_type}] LLM run completed ({len(output)} chars)")
+                return {
+                    "status": "accepted",
+                    "output": output,
+                    "model": api_model,
+                    "department": department_type,
+                    "company_slug": company_slug,
+                }
+            else:
+                logger.warning(
+                    f"[{company_slug}/{department_type}] LLM proxy {resp.status_code}: {resp.text[:200]}"
+                )
+
+    except httpx.ConnectError:
+        logger.warning(f"[{company_slug}/{department_type}] LLM proxy unreachable at {anthropic_base}")
+    except Exception as e:
+        logger.warning(f"[{company_slug}/{department_type}] LLM proxy error: {e}")
+
+    # Final fallback: Anthropic Python SDK (if real key is available)
+    real_key = _os2.environ.get("ANTHROPIC_API_KEY") or getattr(settings, "ANTHROPIC_API_KEY", None)
+    if real_key and real_key != "dummy":
+        try:
+            import anthropic
+            client_sdk = anthropic.Anthropic(api_key=real_key)
+            response = client_sdk.messages.create(
+                model=api_model,
+                max_tokens=4096,
+                messages=[{"role": "user", "content": task_prompt}],
+            )
+            output = response.content[0].text if response.content else ""
+            _apply_agent_output(output, workspace, department_type)
+            logger.info(f"[{company_slug}/{department_type}] Anthropic SDK run completed ({len(output)} chars)")
+            return {
+                "status": "accepted",
+                "output": output,
+                "model": api_model,
+                "department": department_type,
+                "company_slug": company_slug,
+            }
+        except Exception as e:
+            logger.error(f"[{company_slug}/{department_type}] Anthropic SDK error: {e}")
+            return {"status": "error", "message": str(e)}
+
+    return {"status": "error", "message": "No LLM available: set ANTHROPIC_API_KEY or ensure local proxy is running"}
+
+
+def _apply_agent_output(output: str, workspace: Path, department_type: str) -> None:
+    """
+    Parse agent output for file write instructions and apply them.
+    Looks for markdown code blocks with file paths as titles.
+    Example:
+      ### File: departments/developer/PLAN.md
+      ```
+      content here
+      ```
+    """
+    import re
+
+    # Pattern: ### File: <path>\n```\n<content>\n```
+    pattern = re.compile(
+        r"###\s+(?:File|UPDATE|Write):\s*`?([^\n`]+)`?\n```[^\n]*\n(.*?)```",
+        re.DOTALL | re.IGNORECASE,
+    )
+    for match in pattern.finditer(output):
+        rel_path = match.group(1).strip()
+        content = match.group(2)
+        # Security: only allow writes within workspace
+        try:
+            target = (workspace / rel_path).resolve()
+            if not str(target).startswith(str(workspace.resolve())):
+                logger.warning(f"Blocked out-of-workspace write: {rel_path}")
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content)
+            logger.info(f"Agent wrote: {rel_path}")
+        except Exception as e:
+            logger.warning(f"Failed to write agent output file {rel_path}: {e}")
 
 
 async def spawn_agent_session(
@@ -278,15 +451,13 @@ async def spawn_agent_session(
     model: str | None = None,
 ) -> dict:
     """
-    Spawn an OpenClaw agent session via the Gateway HTTP API.
-    Uses model tiering: CEO=Opus, others=Sonnet.
+    Spawn an agent session.
+    Primary: OpenClaw Gateway HTTP API.
+    Fallback: Anthropic API directly (when gateway is unreachable from Docker).
     """
     workspace = get_company_workspace(company_id, company_slug)
     agent_id = DEPT_TO_AGENT.get(department_type, "coordinator")
     token = _get_gateway_token()
-
-    if not token:
-        return {"status": "error", "message": "No gateway token configured"}
 
     # Model tiering
     if not model:
@@ -302,72 +473,73 @@ async def spawn_agent_session(
         chat_history=chat_history,
     )
 
-    spawn_args: dict = {
-        "agentId": agent_id,
-        "task": task_prompt,
-        "cwd": str(workspace),
-        "mode": "run",
-        "runTimeoutSeconds": timeout_seconds,
-    }
-    if model:
-        spawn_args["model"] = model
+    # Try OpenClaw gateway first (works when running on the host)
+    if token:
+        spawn_args: dict = {
+            "agentId": agent_id,
+            "task": task_prompt,
+            "cwd": str(workspace),
+            "mode": "run",
+            "runTimeoutSeconds": timeout_seconds,
+        }
+        if model:
+            spawn_args["model"] = model
 
-    logger.info(
-        f"Spawning {department_type} agent (openclaw:{agent_id}, model:{model}) "
-        f"for {company_slug}"
-    )
+        logger.info(
+            f"Spawning {department_type} agent via gateway (openclaw:{agent_id}, model:{model}) "
+            f"for {company_slug}"
+        )
 
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{GATEWAY_URL}/tools/invoke",
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "tool": "sessions_spawn",
-                    "args": spawn_args,
-                },
-                timeout=30.0,
-            )
-            
-            result = response.json()
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{GATEWAY_URL}/tools/invoke",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "tool": "sessions_spawn",
+                        "args": spawn_args,
+                    },
+                    timeout=30.0,
+                )
 
-            if not result.get("ok"):
-                error = result.get("error", {})
-                logger.error(f"Gateway spawn failed: {error}")
-                return {
-                    "status": "error",
-                    "message": error.get("message", str(error)),
-                }
+                result = response.json()
 
-            # Parse the nested result
-            content = result.get("result", {}).get("content", [])
-            details = {}
-            for item in content:
-                if item.get("type") == "text":
-                    try:
-                        details = json.loads(item["text"])
-                    except (json.JSONDecodeError, KeyError):
-                        pass
+                if result.get("ok"):
+                    # Parse the nested result
+                    content = result.get("result", {}).get("content", [])
+                    details = {}
+                    for item in content:
+                        if item.get("type") == "text":
+                            try:
+                                details = json.loads(item["text"])
+                            except (json.JSONDecodeError, KeyError):
+                                pass
 
-            return {
-                "status": "accepted",
-                "session_key": details.get("childSessionKey"),
-                "run_id": details.get("runId"),
-                "agent_id": agent_id,
-                "department": department_type,
-                "company_slug": company_slug,
-                "model": model,
-            }
+                    return {
+                        "status": "accepted",
+                        "session_key": details.get("childSessionKey"),
+                        "run_id": details.get("runId"),
+                        "agent_id": agent_id,
+                        "department": department_type,
+                        "company_slug": company_slug,
+                        "model": model,
+                    }
+                else:
+                    error = result.get("error", {})
+                    logger.warning(f"Gateway spawn failed, falling back to Anthropic: {error}")
 
-    except httpx.TimeoutException:
-        logger.error(f"Gateway timeout for {department_type}/{company_slug}")
-        return {"status": "error", "message": "Gateway request timed out"}
-    except Exception as e:
-        logger.error(f"Gateway error: {e}")
-        return {"status": "error", "message": str(e)}
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
+            logger.warning(f"Gateway unreachable ({e}), falling back to Anthropic API")
+        except Exception as e:
+            logger.warning(f"Gateway error ({e}), falling back to Anthropic API")
+    else:
+        logger.info(f"No gateway token, using Anthropic API directly for {department_type}")
+
+    # Fallback: Anthropic API
+    return await _spawn_via_anthropic(company_slug, department_type, task_prompt, model, workspace)
 
 
 async def send_to_session(session_key: str, message: str) -> dict:

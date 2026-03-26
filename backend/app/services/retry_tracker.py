@@ -10,7 +10,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-COMPANIES_DIR = Path("/home/philip/TinkerLab/autobiz/companies")
+import os as _os_; COMPANIES_DIR = Path(_os_.environ.get("COMPANIES_DIR", "/app/companies"))
 
 
 def _task_id(task_text: str) -> str:

@@ -10,7 +10,13 @@ from app.models.company import CompanyStatus
 class CompanyCreate(BaseModel):
     name: str = Field(..., max_length=255)
     mission: str | None = Field(None, max_length=1000)
+    # "idea" is accepted as an alias for mission (frontend may send either)
+    idea: str | None = Field(None, max_length=1000)
     slug: str = Field(..., max_length=100, pattern=r"^[a-z0-9][a-z0-9-]*[a-z0-9]$")
+
+    def get_mission(self) -> str | None:
+        """Return mission, falling back to idea if mission is not provided."""
+        return self.mission or self.idea
 
 
 class CompanyUpdate(BaseModel):

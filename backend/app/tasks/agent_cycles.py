@@ -9,6 +9,7 @@ Implements:
 """
 import asyncio
 import logging
+import os
 import re
 import uuid
 from datetime import datetime, timezone
@@ -45,7 +46,7 @@ from app.services.retry_tracker import (
 
 logger = logging.getLogger(__name__)
 
-COMPANIES_DIR = Path("/home/philip/TinkerLab/autobiz/companies")
+COMPANIES_DIR = Path(os.environ.get("COMPANIES_DIR", "/app/companies"))
 
 
 def _run_async(coro):
@@ -96,7 +97,7 @@ async def _dispatch_queued_content(slug: str) -> dict:
     from pathlib import Path
     from datetime import datetime, timezone as tz
 
-    content_dir = Path(f"/home/philip/TinkerLab/autobiz/companies/{slug}/content")
+    content_dir = COMPANIES_DIR / slug / "content"
     results = {"dispatched": 0, "tweets": 0, "linkedin": 0, "emails": 0, "errors": []}
 
     # ── Tweets ──
@@ -420,9 +421,11 @@ async def _execute_department_cycle(
             )
 
         # 2. CREATE AGENT RUN RECORD
+        from app.models.agent_run import RunTrigger
         agent_run = AgentRun(
             company_id=company.id,
             department_id=department.id,
+            trigger=RunTrigger.manual if task_override else RunTrigger.scheduled,
             status=RunStatus.running,
         )
         db.add(agent_run)

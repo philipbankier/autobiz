@@ -13,7 +13,7 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-COMPANIES_DIR = Path("/home/philip/TinkerLab/autobiz/companies")
+import os as _os_; COMPANIES_DIR = Path(_os_.environ.get("COMPANIES_DIR", "/app/companies"))
 
 RESEND_API_URL = "https://api.resend.com"
 MAX_EMAILS_PER_DAY = 100

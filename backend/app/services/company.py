@@ -22,7 +22,7 @@ async def create_company(db: AsyncSession, user_id: uuid.UUID, data: CompanyCrea
     company = Company(
         user_id=user_id,
         name=data.name,
-        mission=data.mission,
+        mission=data.get_mission(),  # falls back to idea field if mission is None
         slug=data.slug,
         status=CompanyStatus.planning,
     )

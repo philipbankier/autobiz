@@ -117,9 +117,10 @@ async def activity_stream(
 
     async def event_generator():
         async for event in subscribe(cid):
+            # Use unnamed events so EventSource.onmessage fires for all events.
+            # The event type is included in the JSON data payload.
             yield {
                 "id": str(event["id"]),
-                "event": event["type"],
                 "data": json.dumps(event),
             }
 

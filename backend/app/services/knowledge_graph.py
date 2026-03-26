@@ -12,7 +12,7 @@ from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
-COMPANIES_DIR = Path("/home/philip/TinkerLab/autobiz/companies")
+import os as _os_; COMPANIES_DIR = Path(_os_.environ.get("COMPANIES_DIR", "/app/companies"))
 
 # Entity types
 ENTITY_TYPES = [

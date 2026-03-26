@@ -58,7 +58,7 @@ def _make_event(
 
 async def publish(
     company_id: str,
-    event_type: EventType,
+    event_type: EventType | str,
     department: str | None = None,
     message: str = "",
     data: dict | None = None,

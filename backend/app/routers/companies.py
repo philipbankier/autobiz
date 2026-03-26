@@ -1,7 +1,11 @@
+import os
 import uuid
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
+
+COMPANIES_DIR = Path(os.environ.get("COMPANIES_DIR", "/app/companies"))
 
 from app.database import get_db
 from app.middleware.auth import get_current_user
@@ -246,8 +250,7 @@ async def get_steering(
     """Read STEERING.md for a company."""
     company = await _get_owned_company(company_id, current_user, db)
 
-    from pathlib import Path
-    steering_path = Path("/home/philip/TinkerLab/autobiz/companies") / company.slug / "STEERING.md"
+    steering_path = COMPANIES_DIR / company.slug / "STEERING.md"
     content = ""
     if steering_path.exists():
         content = steering_path.read_text()
@@ -270,8 +273,7 @@ async def update_steering(
     company = await _get_owned_company(company_id, current_user, db)
 
     content = body.get("content", "")
-    from pathlib import Path
-    steering_path = Path("/home/philip/TinkerLab/autobiz/companies") / company.slug / "STEERING.md"
+    steering_path = COMPANIES_DIR / company.slug / "STEERING.md"
     steering_path.parent.mkdir(parents=True, exist_ok=True)
     steering_path.write_text(content)
 
@@ -285,13 +287,102 @@ async def update_steering(
 @router.delete("/{company_id}", response_model=dict)
 async def delete(
     company_id: uuid.UUID,
+    hard: bool = Query(False, description="Full teardown: delete GitHub repo, Vercel project, Stripe account"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """
+    Delete a company.
+    - Soft delete (default): archives in DB, stops scheduled tasks.
+    - Hard delete (?hard=true): also deletes GitHub repo, Vercel project, and Stripe account.
+    """
     company = await _get_owned_company(company_id, current_user, db)
+
+    # Always: unschedule Celery Beat tasks
+    teardown_results: dict = {"scheduler": "unscheduled"}
+    try:
+        from app.services.agent_scheduler import unschedule_company_cycles
+        unschedule_company_cycles(str(company.id), slug=company.slug)
+    except Exception as e:
+        teardown_results["scheduler"] = f"error: {e}"
+
+    if hard:
+        # Read the company .env for stored IDs
+        env_file = COMPANIES_DIR / company.slug / ".env"
+        env_data: dict = {}
+        if env_file.exists():
+            for line in env_file.read_text().splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, _, v = line.partition("=")
+                    env_data[k.strip()] = v.strip()
+
+        # Delete GitHub repo
+        from app.config import settings as app_settings
+        if app_settings.GITHUB_PAT:
+            github_repo = env_data.get("GITHUB_REPO")
+            if github_repo:
+                try:
+                    import httpx
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.delete(
+                            f"https://api.github.com/repos/{github_repo}",
+                            headers={
+                                "Authorization": f"Bearer {app_settings.GITHUB_PAT}",
+                                "Accept": "application/vnd.github+json",
+                            },
+                            timeout=10.0,
+                        )
+                    teardown_results["github"] = "deleted" if resp.status_code == 204 else f"error: {resp.status_code}"
+                except Exception as e:
+                    teardown_results["github"] = f"error: {e}"
+            else:
+                teardown_results["github"] = "no_repo_configured"
+
+        # Delete Vercel project
+        if app_settings.VERCEL_TOKEN:
+            vercel_project_id = env_data.get("VERCEL_PROJECT_ID")
+            if vercel_project_id:
+                try:
+                    import httpx
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.delete(
+                            f"https://api.vercel.com/v9/projects/{vercel_project_id}",
+                            headers={"Authorization": f"Bearer {app_settings.VERCEL_TOKEN}"},
+                            timeout=10.0,
+                        )
+                    teardown_results["vercel"] = "deleted" if resp.status_code == 204 else f"error: {resp.status_code}"
+                except Exception as e:
+                    teardown_results["vercel"] = f"error: {e}"
+            else:
+                teardown_results["vercel"] = "no_project_configured"
+
+        # Soft-delete Stripe Connect account (can't fully delete, just reject)
+        stripe_account_id = env_data.get("STRIPE_CONNECT_ACCOUNT_ID")
+        if stripe_account_id and app_settings.STRIPE_SECRET_KEY:
+            try:
+                import httpx
+                async with httpx.AsyncClient() as client:
+                    resp = await client.delete(
+                        f"https://api.stripe.com/v1/accounts/{stripe_account_id}",
+                        auth=(app_settings.STRIPE_SECRET_KEY, ""),
+                        timeout=10.0,
+                    )
+                teardown_results["stripe"] = "deleted" if resp.status_code == 200 else f"error: {resp.status_code}"
+            except Exception as e:
+                teardown_results["stripe"] = f"error: {e}"
+
+    # Archive in DB
     company = await archive_company(db, company)
+    await db.commit()
+
     return {
-        "data": {"id": str(company.id), "status": company.status.value},
+        "data": {
+            "id": str(company.id),
+            "status": company.status.value,
+            "hard": hard,
+            "teardown": teardown_results,
+        },
         "error": None,
-        "meta": None,
+        "meta": {"message": "Company archived" if not hard else "Company fully deleted"},
     }

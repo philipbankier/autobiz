@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:15-alpine
+    image: postgres:16-alpine
     environment:
       POSTGRES_DB: autobiz
       POSTGRES_USER: autobiz
@@ -25,53 +25,81 @@ services:
       timeout: 5s
       retries: 5
 
+  cron-proxy:
+    image: python:3.12-slim
+    network_mode: host
+    volumes:
+      - ./cron-proxy.py:/app/cron-proxy.py:ro
+      - /home/philip/.nvm/versions/node/v22.19.0:/opt/node:ro
+      - /home/philip/.openclaw:/home/philip/.openclaw
+    environment:
+      NODE_BIN: /opt/node/bin/node
+      OPENCLAW_BIN: /opt/node/bin/openclaw
+      HOME: /home/philip
+    command: python3 /app/cron-proxy.py
+
   backend:
     build: ./backend
-    ports:
-      - "8000:8000"
+    network_mode: host
     env_file:
       - ./backend/.env
     environment:
-      DATABASE_URL: postgresql+asyncpg://autobiz:autobiz_dev@db:5432/autobiz
-      REDIS_URL: redis://redis:6379/0
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      DATABASE_URL: postgresql+asyncpg://autobiz:autobiz_dev@localhost:5432/autobiz
+      REDIS_URL: redis://localhost:6379/0
+      OPENCLAW_GATEWAY_URL: http://127.0.0.1:18789
+      COMPANIES_DIR: /home/philip/TinkerLab/autobiz/companies
+      ANTHROPIC_API_BASE: http://127.0.0.1:8322
+      ANTHROPIC_API_KEY: dummy
     volumes:
-      - ./companies:/app/companies
+      - ./companies:/home/philip/TinkerLab/autobiz/companies
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
 
   celery-worker:
     build: ./backend
-    command: celery -A app.worker worker --loglevel=info --concurrency=2
+    command: celery -A app.worker worker --loglevel=info --concurrency=2 --without-gossip --without-mingle
+    # network_mode: host gives workers access to 127.0.0.1 services (LLM proxy at :8321, gateway at :18789)
+    network_mode: host
     env_file:
       - ./backend/.env
     environment:
-      DATABASE_URL: postgresql+asyncpg://autobiz:autobiz_dev@db:5432/autobiz
-      REDIS_URL: redis://redis:6379/0
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      # Use localhost since we share the host network
+      DATABASE_URL: postgresql+asyncpg://autobiz:autobiz_dev@localhost:5432/autobiz
+      REDIS_URL: redis://localhost:6379/0
+      OPENCLAW_GATEWAY_URL: http://127.0.0.1:18789
+      COMPANIES_DIR: /home/philip/TinkerLab/autobiz/companies
+      ANTHROPIC_API_BASE: http://127.0.0.1:8322
+      ANTHROPIC_API_KEY: dummy
     volumes:
-      - ./companies:/app/companies
+      - ./companies:/home/philip/TinkerLab/autobiz/companies
 
   celery-beat:
     build: ./backend
     command: celery -A app.worker beat --loglevel=info
     env_file:
       - ./backend/.env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       DATABASE_URL: postgresql+asyncpg://autobiz:autobiz_dev@db:5432/autobiz
       REDIS_URL: redis://redis:6379/0
+      OPENCLAW_GATEWAY_URL: http://host.docker.internal:18799
+      COMPANIES_DIR: /app/companies
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3002:3000"
+    environment:
+      # Internal API URL (service-to-service inside Docker)
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NODE_ENV: production
+    depends_on:
+      - backend
 
 volumes:
   pgdata:
