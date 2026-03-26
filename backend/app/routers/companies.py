@@ -166,8 +166,8 @@ async def scheduler_start(
     """Register cron jobs for all departments of a company."""
     company = await _get_owned_company(company_id, current_user, db)
 
-    from app.services.scheduler import register_company_cron_jobs
-    result = await register_company_cron_jobs(str(company.id), company.slug)
+    from app.services.agent_scheduler import schedule_company_cycles
+    result = schedule_company_cycles(str(company.id), slug=company.slug)
 
     return {
         "data": {"company_id": str(company.id), "slug": company.slug, "jobs": result},
@@ -185,8 +185,8 @@ async def scheduler_stop(
     """Unregister all cron jobs for a company."""
     company = await _get_owned_company(company_id, current_user, db)
 
-    from app.services.scheduler import unregister_company_cron_jobs
-    result = await unregister_company_cron_jobs(company.slug)
+    from app.services.agent_scheduler import unschedule_company_cycles
+    result = unschedule_company_cycles(str(company.id), slug=company.slug)
 
     return {
         "data": {"company_id": str(company.id), "slug": company.slug, "jobs": result},
@@ -204,8 +204,14 @@ async def scheduler_status(
     """List active cron jobs for a company."""
     company = await _get_owned_company(company_id, current_user, db)
 
-    from app.services.scheduler import list_company_cron_jobs
-    jobs = await list_company_cron_jobs(company.slug)
+    from app.worker import celery_app
+    beat_schedule = celery_app.conf.beat_schedule or {}
+    prefix = f"autobiz-{company.slug}-"
+    jobs = [
+        {"name": k, "task": v.get("task"), "args": v.get("args")}
+        for k, v in beat_schedule.items()
+        if k.startswith(prefix)
+    ]
 
     return {
         "data": {"company_id": str(company.id), "slug": company.slug, "jobs": jobs},
