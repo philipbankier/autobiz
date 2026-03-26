@@ -24,13 +24,14 @@ ALLOWED_ORIGINS = [
     "http://localhost:3002",
     "http://127.0.0.1:3000",
     "http://127.0.0.1:3001",
+    "https://autobiz-app.vercel.app",
     "http://127.0.0.1:3002",
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_origin_regex=r"https://.*\.autobiz\.app",
+    allow_origin_regex=r"https://.*\.(autobiz\.app|vercel\.app)",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
