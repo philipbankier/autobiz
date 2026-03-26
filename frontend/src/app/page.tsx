@@ -2,73 +2,115 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
   Zap,
-  Bot,
-  Clock,
-  BarChart3,
-  Rocket,
-  DollarSign,
-  Shield,
   ArrowRight,
   CheckCircle2,
+  Lightbulb,
+  Users,
+  BarChart3,
+  Crown,
+  Code2,
+  Megaphone,
+  Coins,
+  Landmark,
+  HeadphonesIcon,
+  Shield,
+  DollarSign,
+  Clock,
 } from "lucide-react";
+
+const departments = [
+  {
+    icon: Crown,
+    name: "CEO",
+    description: "Sets strategy, coordinates teams, and keeps everything on track.",
+    color: "text-amber-400",
+    bg: "bg-amber-500/10",
+  },
+  {
+    icon: Code2,
+    name: "Developer",
+    description: "Builds your product, deploys code, and manages your tech stack.",
+    color: "text-blue-400",
+    bg: "bg-blue-500/10",
+  },
+  {
+    icon: Megaphone,
+    name: "Marketing",
+    description: "Creates content, runs campaigns, and grows your audience.",
+    color: "text-pink-400",
+    bg: "bg-pink-500/10",
+  },
+  {
+    icon: Coins,
+    name: "Sales",
+    description: "Finds leads, handles outreach, and closes deals.",
+    color: "text-green-400",
+    bg: "bg-green-500/10",
+  },
+  {
+    icon: Landmark,
+    name: "Finance",
+    description: "Tracks spending, manages budgets, and keeps the books clean.",
+    color: "text-purple-400",
+    bg: "bg-purple-500/10",
+  },
+  {
+    icon: HeadphonesIcon,
+    name: "Support",
+    description: "Answers questions, resolves issues, and keeps customers happy.",
+    color: "text-cyan-400",
+    bg: "bg-cyan-500/10",
+  },
+];
 
 const features = [
   {
-    icon: Bot,
-    title: "Agent Departments",
-    description:
-      "Six specialized AI departments — CEO, Developer, Marketing, Sales, Finance, and Support — each with role-specific instructions and autonomous execution.",
-  },
-  {
-    icon: Clock,
-    title: "Auto-Scheduling",
-    description:
-      "3-layer hybrid scheduler: CRON for timed runs, EVENT triggers from webhooks, and CONDITION filters that skip idle departments to save 50–70% on costs.",
-  },
-  {
     icon: BarChart3,
-    title: "Real-Time Dashboard",
+    title: "Watch it happen live",
     description:
-      "Live SSE activity feed, department status cards with budget bars, steering editor, and scheduler controls — all in one view.",
-  },
-  {
-    icon: Rocket,
-    title: "One-Click Deploy",
-    description:
-      "GitHub repo creation, Vercel deployment, and custom domain setup — triggered automatically by your Developer agent.",
+      "A real-time dashboard shows what each department is working on, what they've accomplished, and what's coming next.",
   },
   {
     icon: DollarSign,
-    title: "Smart Budget Control",
+    title: "Stay in control of costs",
     description:
-      "Per-department daily spend limits with model tiering. Opus for strategy, Sonnet for coding, Haiku for quality checks.",
+      "Set daily spending limits for each department. Your AI team works smart within the budget you choose.",
   },
   {
     icon: Shield,
-    title: "Quality Gates",
+    title: "Quality you can trust",
     description:
-      "Every agent output is scored by an LLM judge on relevance, quality, completeness, and safety. Failed outputs retry with feedback.",
+      "Every piece of work is automatically reviewed before it goes live. Nothing ships unless it meets the bar.",
+  },
+  {
+    icon: Clock,
+    title: "Runs while you sleep",
+    description:
+      "Your departments work around the clock on their own schedule. Check in when you want, or let them handle it.",
   },
 ];
 
 const steps = [
   {
     number: "1",
-    title: "Describe",
+    icon: Lightbulb,
+    title: "Describe your idea",
     description:
-      "Tell AutoBiz your business idea — name, mission, and what you want to build.",
+      "Tell us what your business does, who it's for, and what you want to build. That's all we need.",
   },
   {
     number: "2",
-    title: "Launch",
+    icon: Users,
+    title: "Meet your AI team",
     description:
-      "AutoBiz provisions 6 AI departments, creates workspace files, and starts scheduling runs.",
+      "In about 90 seconds, six departments spin up and start working on your business.",
   },
   {
     number: "3",
-    title: "Watch",
+    icon: BarChart3,
+    title: "Watch and steer",
     description:
-      "Monitor progress on the real-time dashboard. Steer priorities. Approve or let agents run free.",
+      "Follow progress on your dashboard. Jump in to guide priorities, or sit back and let them run.",
   },
 ];
 
@@ -108,20 +150,19 @@ export default function LandingPage() {
           <div className="max-w-6xl mx-auto px-6 pt-28 pb-20 text-center">
             <div className="inline-flex items-center gap-2 rounded-full border border-gray-800 bg-gray-900 px-4 py-1.5 text-sm text-gray-400 mb-8">
               <Zap className="h-3.5 w-3.5 text-purple-500" />
-              AI-Powered Business Automation
+              Free during beta
             </div>
 
             <h1 className="text-5xl sm:text-6xl md:text-7xl font-bold tracking-tight max-w-4xl mx-auto leading-[1.1]">
-              Launch AI-Powered Businesses in{" "}
+              Describe your idea.{" "}
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-indigo-400">
-                90 Seconds
+                We build your AI company.
               </span>
             </h1>
 
             <p className="mt-6 text-lg text-gray-400 max-w-2xl mx-auto leading-relaxed">
-              Describe your idea. AutoBiz spins up six autonomous AI departments that
-              plan, build, market, and sell — while you sleep. Real-time dashboard.
-              Budget controls. Quality gates. All on autopilot.
+              Tell us your business idea and get a full AI-powered team in 90 seconds.
+              Six departments that plan, build, market, and sell — working for you around the clock.
             </p>
 
             <div className="flex items-center justify-center gap-4 mt-10">
@@ -144,35 +185,69 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* Features Grid */}
+        {/* AI Team */}
         <section className="max-w-6xl mx-auto px-6 py-24">
           <div className="text-center mb-16">
             <h2 className="text-3xl sm:text-4xl font-bold">
-              Everything your AI company needs
+              Your AI team, ready to work
             </h2>
             <p className="mt-3 text-gray-400 max-w-xl mx-auto">
-              Six departments. Three scheduling layers. One dashboard.
+              Six departments that handle the day-to-day so you can focus on the big picture.
             </p>
           </div>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {features.map((feature) => {
-              const Icon = feature.icon;
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            {departments.map((dept) => {
+              const Icon = dept.icon;
               return (
                 <div
-                  key={feature.title}
+                  key={dept.name}
                   className="rounded-xl border border-gray-800 bg-gray-900/50 p-6 hover:border-purple-500/30 transition-colors"
                 >
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-500/10 mb-4">
-                    <Icon className="h-5 w-5 text-purple-400" />
+                  <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${dept.bg} mb-4`}>
+                    <Icon className={`h-5 w-5 ${dept.color}`} />
                   </div>
-                  <h3 className="text-lg font-semibold mb-2">{feature.title}</h3>
+                  <h3 className="text-lg font-semibold mb-1">{dept.name}</h3>
                   <p className="text-sm text-gray-400 leading-relaxed">
-                    {feature.description}
+                    {dept.description}
                   </p>
                 </div>
               );
             })}
+          </div>
+        </section>
+
+        {/* Features */}
+        <section className="border-t border-gray-800">
+          <div className="max-w-6xl mx-auto px-6 py-24">
+            <div className="text-center mb-16">
+              <h2 className="text-3xl sm:text-4xl font-bold">
+                You stay in charge
+              </h2>
+              <p className="mt-3 text-gray-400 max-w-xl mx-auto">
+                Your AI team is autonomous, but you always have the final say.
+              </p>
+            </div>
+
+            <div className="grid sm:grid-cols-2 gap-6">
+              {features.map((feature) => {
+                const Icon = feature.icon;
+                return (
+                  <div
+                    key={feature.title}
+                    className="rounded-xl border border-gray-800 bg-gray-900/50 p-6 hover:border-purple-500/30 transition-colors"
+                  >
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-500/10 mb-4">
+                      <Icon className="h-5 w-5 text-purple-400" />
+                    </div>
+                    <h3 className="text-lg font-semibold mb-2">{feature.title}</h3>
+                    <p className="text-sm text-gray-400 leading-relaxed">
+                      {feature.description}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </section>
 
@@ -184,49 +259,25 @@ export default function LandingPage() {
                 How it works
               </h2>
               <p className="mt-3 text-gray-400">
-                Three steps. No configuration headaches.
+                From idea to running business in three steps.
               </p>
             </div>
 
             <div className="grid md:grid-cols-3 gap-8">
-              {steps.map((step) => (
-                <div key={step.number} className="text-center">
-                  <div className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-purple-600 text-white text-xl font-bold mb-4">
-                    {step.number}
+              {steps.map((step) => {
+                const Icon = step.icon;
+                return (
+                  <div key={step.number} className="text-center">
+                    <div className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-purple-600 text-white text-xl font-bold mb-4">
+                      {step.number}
+                    </div>
+                    <h3 className="text-xl font-semibold mb-2">{step.title}</h3>
+                    <p className="text-gray-400 text-sm leading-relaxed">
+                      {step.description}
+                    </p>
                   </div>
-                  <h3 className="text-xl font-semibold mb-2">{step.title}</h3>
-                  <p className="text-gray-400 text-sm leading-relaxed">
-                    {step.description}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* Benchmark */}
-        <section className="border-t border-gray-800">
-          <div className="max-w-4xl mx-auto px-6 py-24 text-center">
-            <h2 className="text-3xl sm:text-4xl font-bold mb-4">
-              Battle-tested
-            </h2>
-            <p className="text-gray-400 mb-10">
-              17 end-to-end tests. 72 seconds. Every feature verified.
-            </p>
-
-            <div className="grid grid-cols-3 gap-6">
-              <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-6">
-                <div className="text-3xl font-bold text-purple-400">17/17</div>
-                <div className="text-sm text-gray-500 mt-1">Tests passing</div>
-              </div>
-              <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-6">
-                <div className="text-3xl font-bold text-purple-400">20s</div>
-                <div className="text-sm text-gray-500 mt-1">Company creation</div>
-              </div>
-              <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-6">
-                <div className="text-3xl font-bold text-purple-400">72s</div>
-                <div className="text-sm text-gray-500 mt-1">Full E2E suite</div>
-              </div>
+                );
+              })}
             </div>
           </div>
         </section>
@@ -235,28 +286,33 @@ export default function LandingPage() {
         <section className="border-t border-gray-800">
           <div className="max-w-4xl mx-auto px-6 py-24 text-center">
             <h2 className="text-3xl sm:text-4xl font-bold mb-4">
-              Pricing
+              Free while we're in beta
             </h2>
+            <p className="text-gray-400 mb-10 max-w-lg mx-auto">
+              Try AutoBiz with no limits and no credit card. We'll introduce simple pricing once we're out of beta.
+            </p>
+
             <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-10 max-w-md mx-auto">
               <div className="text-sm text-purple-400 font-medium uppercase tracking-wider mb-2">
-                Coming Soon
+                Beta
               </div>
-              <div className="text-4xl font-bold mb-2">Early Access</div>
+              <div className="text-4xl font-bold mb-2">$0</div>
               <p className="text-gray-400 mb-6">
-                Free while in beta. Usage-based pricing launching soon.
+                Everything included. No strings attached.
               </p>
               <Link href="/register">
                 <Button className="w-full bg-purple-600 hover:bg-purple-700 text-white gap-2">
-                  Get Early Access
+                  Get Started Free
                   <ArrowRight className="h-4 w-4" />
                 </Button>
               </Link>
               <div className="mt-6 space-y-2 text-left">
                 {[
-                  "6 AI departments included",
+                  "6 AI departments",
                   "Real-time dashboard",
                   "Unlimited companies",
-                  "Deploy pipeline",
+                  "Budget controls",
+                  "Quality gates",
                 ].map((item) => (
                   <div key={item} className="flex items-center gap-2 text-sm text-gray-400">
                     <CheckCircle2 className="h-4 w-4 text-purple-500 shrink-0" />
@@ -272,14 +328,14 @@ export default function LandingPage() {
         <section className="border-t border-gray-800">
           <div className="max-w-6xl mx-auto px-6 py-24 text-center">
             <h2 className="text-3xl sm:text-4xl font-bold mb-4">
-              Ready to automate your business?
+              Your next business is one idea away
             </h2>
             <p className="text-gray-400 mb-8 max-w-lg mx-auto">
-              Create your first AI company in under two minutes. No credit card required.
+              Describe what you want to build. Your AI team handles the rest.
             </p>
             <Link href="/register">
               <Button size="lg" className="gap-2 bg-purple-600 hover:bg-purple-700 text-white px-8 h-12 text-base">
-                Get Started Free
+                Start Building Free
                 <ArrowRight className="h-4 w-4" />
               </Button>
             </Link>
@@ -302,7 +358,7 @@ export default function LandingPage() {
               Get Started
             </Link>
           </div>
-          <p>Built with AI, for AI-powered businesses.</p>
+          <p>Your AI-powered business team.</p>
         </div>
       </footer>
     </div>
