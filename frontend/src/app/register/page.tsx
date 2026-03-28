@@ -38,8 +38,12 @@ export default function RegisterPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-950">
       <Card className="w-full max-w-md p-8 bg-gray-900 border-gray-800">
-        <h1 className="text-2xl font-bold text-white mb-2">Create your account</h1>
-        <p className="text-gray-400 mb-6">Start with $5 free credit to launch your first company</p>
+        <h1 className="text-2xl font-bold text-white mb-2">
+          Start building your business
+        </h1>
+        <p className="text-gray-400 mb-6">
+          Free to start. No credit card required.
+        </p>
 
         {error && (
           <div className="bg-red-900/30 border border-red-800 text-red-300 px-4 py-2 rounded mb-4">
@@ -82,14 +86,18 @@ export default function RegisterPage() {
               className="bg-gray-800 border-gray-700 text-white"
             />
           </div>
-          <Button type="submit" className="w-full" disabled={loading}>
+          <Button
+            type="submit"
+            className="w-full bg-emerald-500 hover:bg-emerald-600 text-white"
+            disabled={loading}
+          >
             {loading ? "Creating account..." : "Create Account"}
           </Button>
         </form>
 
         <p className="text-gray-500 text-sm mt-4 text-center">
           Already have an account?{" "}
-          <Link href="/login" className="text-blue-400 hover:underline">
+          <Link href="/login" className="text-emerald-400 hover:underline">
             Sign in
           </Link>
         </p>

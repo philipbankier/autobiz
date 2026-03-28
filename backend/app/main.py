@@ -1,6 +1,8 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 import asyncio
 import logging
@@ -14,6 +16,13 @@ app = FastAPI(
     description="AI-powered business automation platform",
     version="0.1.0",
 )
+
+# Rate limiting
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # CORS — allow frontend origins (wildcards require allow_credentials=False for most browsers,
 # but EventSource doesn't send credentials anyway; JWT is passed as a query param).

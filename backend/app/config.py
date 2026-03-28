@@ -5,6 +5,16 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://autobiz:autobiz@localhost:5432/autobiz"
     REDIS_URL: str = "redis://localhost:6379/0"
     JWT_SECRET: str = "change-me-to-a-random-secret-key"
+
+    def validate_jwt_secret(self):
+        if self.JWT_SECRET == "change-me-to-a-random-secret-key":
+            import warnings
+            warnings.warn(
+                "CRITICAL: JWT_SECRET is set to the default value. "
+                "Set a unique JWT_SECRET in your .env file. "
+                "Run: python -c \"import secrets; print(secrets.token_urlsafe(64))\"",
+                stacklevel=2,
+            )
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 1440
     STRIPE_SECRET_KEY: str = ""

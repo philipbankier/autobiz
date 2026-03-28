@@ -1,0 +1,20 @@
+{
+  "name": "flowtest-api",
+  "version": "0.1.0",
+  "description": "FlowTest API — E2E test intelligence backend",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "fastify": "^4.28.1",
+    "@fastify/static": "^7.0.4",
+    "@fastify/cors": "^9.0.1",
+    "better-sqlite3": "^9.6.0",
+    "uuid": "^9.0.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

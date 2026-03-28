@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>E2E Test Company — Ship With Confidence</title>
+  <meta name="description" content="End-to-end testing tools that make testing faster, smarter, and more accessible. No more flaky tests, no more mystery failures." />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0a0b0f;
+      --surface:  #13151c;
+      --border:   #1f2230;
+      --accent:   #6c63ff;
+      --accent2:  #4ade80;
+      --text:     #e2e4ef;
+      --muted:    #7a7f9a;
+      --error:    #f87171;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    /* ── NAV ── */
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1.25rem 2rem;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      background: var(--bg);
+      z-index: 100;
+      backdrop-filter: blur(12px);
+    }
+
+    .logo {
+      font-weight: 700;
+      font-size: 1.1rem;
+      letter-spacing: -0.02em;
+      color: var(--text);
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .logo-icon {
+      width: 28px; height: 28px;
+      background: var(--accent);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.85rem;
+    }
+
+    nav a.nav-link {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.9rem;
+      transition: color 0.2s;
+    }
+    nav a.nav-link:hover { color: var(--text); }
+
+    .nav-cta {
+      background: var(--accent);
+      color: #fff;
+      padding: 0.5rem 1.25rem;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: opacity 0.2s;
+    }
+    .nav-cta:hover { opacity: 0.85; }
+
+    /* ── HERO ── */
+    .hero {
+      max-width: 780px;
+      margin: 0 auto;
+      padding: 6rem 2rem 4rem;
+      text-align: center;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      background: rgba(108,99,255,0.12);
+      border: 1px solid rgba(108,99,255,0.3);
+      color: #a89eff;
+      font-size: 0.8rem;
+      font-weight: 500;
+      padding: 0.35rem 0.9rem;
+      border-radius: 100px;
+      margin-bottom: 1.5rem;
+    }
+
+    h1 {
+      font-size: clamp(2.2rem, 5vw, 3.6rem);
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      line-height: 1.1;
+      margin-bottom: 1.25rem;
+      background: linear-gradient(135deg, #ffffff 0%, #9d99ff 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .subtitle {
+      font-size: 1.15rem;
+      color: var(--muted);
+      max-width: 520px;
+      margin: 0 auto 2.5rem;
+      line-height: 1.7;
+    }
+
+    /* ── EMAIL FORM ── */
+    .waitlist-form {
+      display: flex;
+      gap: 0.75rem;
+      max-width: 440px;
+      margin: 0 auto 1rem;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .waitlist-form input[type="email"] {
+      flex: 1;
+      min-width: 220px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.75rem 1rem;
+      border-radius: 10px;
+      font-size: 0.95rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .waitlist-form input[type="email"]:focus {
+      border-color: var(--accent);
+    }
+    .waitlist-form input::placeholder { color: var(--muted); }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 0.75rem 1.5rem;
+      border-radius: 10px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: opacity 0.2s, transform 0.1s;
+    }
+    .btn-primary:hover { opacity: 0.9; }
+    .btn-primary:active { transform: scale(0.98); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .form-note {
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    .form-success {
+      display: none;
+      background: rgba(74,222,128,0.1);
+      border: 1px solid rgba(74,222,128,0.3);
+      color: var(--accent2);
+      padding: 0.75rem 1.5rem;
+      border-radius: 10px;
+      font-size: 0.9rem;
+      max-width: 440px;
+      margin: 0 auto;
+    }
+
+    .form-error {
+      display: none;
+      background: rgba(248,113,113,0.1);
+      border: 1px solid rgba(248,113,113,0.3);
+      color: var(--error);
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      max-width: 440px;
+      margin: 0.5rem auto 0;
+    }
+
+    /* ── SOCIAL PROOF ── */
+    .social-proof {
+      color: var(--muted);
+      font-size: 0.82rem;
+      margin-top: 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
+    }
+    .avatars {
+      display: flex;
+    }
+    .avatar {
+      width: 26px; height: 26px;
+      border-radius: 50%;
+      border: 2px solid var(--bg);
+      background: var(--accent);
+      margin-left: -8px;
+      font-size: 0.65rem;
+      display: flex; align-items: center; justify-content: center;
+      color: #fff;
+      font-weight: 700;
+    }
+    .avatar:first-child { margin-left: 0; }
+    .avatar:nth-child(2) { background: #8b5cf6; }
+    .avatar:nth-child(3) { background: #06b6d4; }
+    .avatar:nth-child(4) { background: #f59e0b; }
+
+    /* ── VALUE PROPS ── */
+    .value-section {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 5rem 2rem;
+    }
+
+    .section-label {
+      text-align: center;
+      color: var(--accent);
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 1rem;
+    }
+
+    .section-title {
+      text-align: center;
+      font-size: clamp(1.6rem, 3vw, 2.2rem);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      margin-bottom: 3.5rem;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1.25rem;
+    }
+
+    .feature-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 1.75rem;
+      transition: border-color 0.2s, transform 0.2s;
+    }
+    .feature-card:hover {
+      border-color: rgba(108,99,255,0.4);
+      transform: translateY(-2px);
+    }
+
+    .feature-icon {
+      font-size: 1.75rem;
+      margin-bottom: 1rem;
+    }
+
+    .feature-title {
+      font-weight: 700;
+      font-size: 1.05rem;
+      margin-bottom: 0.5rem;
+      color: var(--text);
+    }
+
+    .feature-desc {
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.6;
+    }
+
+    /* ── PAIN POINTS ── */
+    .pain-section {
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      padding: 5rem 2rem;
+    }
+
+    .pain-inner {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    .pain-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2rem;
+    }
+
+    @media (max-width: 600px) {
+      .pain-grid { grid-template-columns: 1fr; }
+    }
+
+    .pain-col h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .pain-col.before h3 { color: #f87171; }
+    .pain-col.after h3 { color: var(--accent2); }
+
+    .pain-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+    }
+
+    .pain-list li {
+      font-size: 0.9rem;
+      color: var(--muted);
+      display: flex;
+      align-items: flex-start;
+      gap: 0.5rem;
+    }
+
+    .pain-list li .icon { flex-shrink: 0; }
+
+    /* ── HOW IT WORKS ── */
+    .how-section {
+      max-width: 700px;
+      margin: 0 auto;
+      padding: 5rem 2rem;
+      text-align: center;
+    }
+
+    .steps {
+      display: flex;
+      flex-direction: column;
+      gap: 2rem;
+      text-align: left;
+      margin-top: 3rem;
+    }
+
+    .step {
+      display: flex;
+      align-items: flex-start;
+      gap: 1.25rem;
+    }
+
+    .step-number {
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      background: rgba(108,99,255,0.15);
+      border: 1px solid rgba(108,99,255,0.3);
+      color: var(--accent);
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700;
+      font-size: 0.85rem;
+      flex-shrink: 0;
+      margin-top: 0.1rem;
+    }
+
+    .step-content h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 0.25rem;
+    }
+
+    .step-content p {
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    /* ── CTA BOTTOM ── */
+    .cta-section {
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 5rem 2rem 7rem;
+      text-align: center;
+    }
+
+    .cta-section h2 {
+      font-size: clamp(1.8rem, 3.5vw, 2.5rem);
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      margin-bottom: 1rem;
+    }
+
+    .cta-section p {
+      color: var(--muted);
+      margin-bottom: 2.5rem;
+    }
+
+    /* ── FOOTER ── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 2rem;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.8rem;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- NAV -->
+  <nav>
+    <a href="/" class="logo">
+      <span class="logo-icon">🧪</span>
+      E2E Test Co.
+    </a>
+    <div style="display:flex; gap: 1.5rem; align-items: center;">
+      <a href="#features" class="nav-link">Features</a>
+      <a href="#how" class="nav-link">How it works</a>
+      <a href="#waitlist" class="nav-cta">Join Waitlist</a>
+    </div>
+  </nav>
+
+  <!-- HERO -->
+  <section class="hero" id="waitlist">
+    <div class="badge">🚀 Early access opening soon</div>
+    <h1>Ship with<br>confidence.</h1>
+    <p class="subtitle">
+      End-to-end testing tools that eliminate flaky tests, slash CI times, and give your team full visibility into what's breaking — and why.
+    </p>
+
+    <form class="waitlist-form" id="waitlistForm">
+      <input
+        type="email"
+        id="emailInput"
+        placeholder="you@company.com"
+        required
+        autocomplete="email"
+      />
+      <button type="submit" class="btn-primary" id="submitBtn">
+        Join the Waitlist
+      </button>
+    </form>
+    <div class="form-error" id="formError"></div>
+    <div class="form-success" id="formSuccess">
+      🎉 You're on the list! We'll reach out when early access opens.
+    </div>
+    <p class="form-note">No spam. Unsubscribe anytime. ~150 engineers already waiting.</p>
+
+    <div class="social-proof">
+      <div class="avatars">
+        <div class="avatar">JK</div>
+        <div class="avatar">AM</div>
+        <div class="avatar">RP</div>
+        <div class="avatar">+</div>
+      </div>
+      &nbsp;Trusted by engineers at early-stage startups and growing teams
+    </div>
+  </section>
+
+  <!-- PAIN vs GAIN -->
+  <section class="pain-section">
+    <div class="pain-inner">
+      <p class="section-label">The Problem → The Fix</p>
+      <h2 class="section-title">Stop firefighting your test suite.</h2>
+      <div class="pain-grid">
+        <div class="pain-col before">
+          <h3>❌ Without E2E Test Co.</h3>
+          <ul class="pain-list">
+            <li><span class="icon">💀</span> Flaky tests that randomly pass and fail with no clear cause</li>
+            <li><span class="icon">⏳</span> CI pipelines taking 20–40 minutes per run</li>
+            <li><span class="icon">🔍</span> Debugging failures that don't reproduce locally</li>
+            <li><span class="icon">🧯</span> Engineers scared to refactor because tests are brittle</li>
+            <li><span class="icon">🤷</span> No visibility into test history or failure patterns</li>
+            <li><span class="icon">💸</span> Wasted hours re-running tests instead of building features</li>
+          </ul>
+        </div>
+        <div class="pain-col after">
+          <h3>✅ With E2E Test Co.</h3>
+          <ul class="pain-list">
+            <li><span class="icon">🎯</span> Flakiness detection — isolates root cause automatically</li>
+            <li><span class="icon">⚡</span> Smart test selection runs only what matters, 5x faster</li>
+            <li><span class="icon">🔬</span> Trace viewer shows exactly what happened in every run</li>
+            <li><span class="icon">🛡️</span> Confidence to refactor with real-time impact analysis</li>
+            <li><span class="icon">📊</span> Full dashboard: history, trends, slowest tests, top failures</li>
+            <li><span class="icon">🚀</span> Ship faster — tests that tell you what's wrong, not what failed</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FEATURES -->
+  <section class="value-section" id="features">
+    <p class="section-label">Features</p>
+    <h2 class="section-title">Everything your test suite needs to be reliable.</h2>
+
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">🔬</div>
+        <h3 class="feature-title">Flakiness Detection</h3>
+        <p class="feature-desc">Automatically identifies flaky tests and reveals whether it's a timing issue, environment dependency, or real code problem.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">⚡</div>
+        <h3 class="feature-title">Smart Test Selection</h3>
+        <p class="feature-desc">Only run tests affected by your changes. Cut CI time by up to 80% without sacrificing coverage.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🗺️</div>
+        <h3 class="feature-title">Trace Viewer</h3>
+        <p class="feature-desc">Step through every test run like a time machine — see DOM state, network requests, and console logs at every moment.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📊</div>
+        <h3 class="feature-title">Test Analytics</h3>
+        <p class="feature-desc">Track pass rates, failure trends, and slowest tests over time. Know your suite health at a glance.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔔</div>
+        <h3 class="feature-title">Smart Alerts</h3>
+        <p class="feature-desc">Get notified when a test suite starts degrading — before it breaks your deploy. Integrates with Slack, PagerDuty, and email.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔌</div>
+        <h3 class="feature-title">Works With Your Stack</h3>
+        <p class="feature-desc">Playwright, Cypress, Jest, Vitest, and more. Drop-in integration with GitHub Actions, CircleCI, and Jenkins.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section class="how-section" id="how">
+    <p class="section-label">How it works</p>
+    <h2 class="section-title">Up and running in under 10 minutes.</h2>
+
+    <div class="steps">
+      <div class="step">
+        <div class="step-number">1</div>
+        <div class="step-content">
+          <h3>Connect your CI pipeline</h3>
+          <p>Add our lightweight reporter to your existing test runner. Works with Playwright, Cypress, Jest, and most frameworks out of the box.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-number">2</div>
+        <div class="step-content">
+          <h3>Run your tests as usual</h3>
+          <p>No changes to your tests needed. We collect run data in the background — timing, screenshots, network logs, DOM snapshots.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-number">3</div>
+        <div class="step-content">
+          <h3>Get instant insights</h3>
+          <p>Your dashboard populates automatically. See failure trends, flaky tests, and run comparisons from the first build.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-number">4</div>
+        <div class="step-content">
+          <h3>Ship faster with confidence</h3>
+          <p>Use smart test selection to cut CI times. Get alerts before problems reach production. Fix real bugs, not test bugs.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- BOTTOM CTA -->
+  <section class="cta-section">
+    <h2>Ready to stop fighting your tests?</h2>
+    <p>Join 150+ engineers on the early access waitlist. Be first to try it — and shape what we build.</p>
+
+    <form class="waitlist-form" id="waitlistForm2">
+      <input
+        type="email"
+        id="emailInput2"
+        placeholder="you@company.com"
+        required
+        autocomplete="email"
+      />
+      <button type="submit" class="btn-primary" id="submitBtn2">
+        Get Early Access
+      </button>
+    </form>
+    <div class="form-error" id="formError2"></div>
+    <div class="form-success" id="formSuccess2">
+      🎉 You're on the list! We'll reach out when early access opens.
+    </div>
+    <p class="form-note" style="margin-top: 0.75rem;">No spam. Cancel anytime.</p>
+  </section>
+
+  <!-- FOOTER -->
+  <footer>
+    <p>© 2026 E2E Test Company · <a href="mailto:hello@e2etestco.com" style="color: var(--muted);">hello@e2etestco.com</a></p>
+  </footer>
+
+  <script>
+    // Waitlist form handler
+    // In production, this would POST to an API endpoint.
+    // Here, we simulate submission and write to localStorage + log for the backend to pick up.
+    async function handleWaitlistSubmit(email, formId) {
+      const form     = document.getElementById(formId);
+      const success  = document.getElementById(formId.replace('Form', 'Success'));
+      const errorEl  = document.getElementById(formId.replace('Form', 'Error'));
+      const btn      = form ? form.querySelector('button') : null;
+
+      if (!email || !email.includes('@')) {
+        if (errorEl) { errorEl.textContent = 'Please enter a valid email.'; errorEl.style.display = 'block'; }
+        return;
+      }
+
+      if (btn) { btn.disabled = true; btn.textContent = 'Joining...'; }
+      if (errorEl) errorEl.style.display = 'none';
+
+      try {
+        // Try to POST to local API endpoint (simulated in waitlist.json)
+        const res = await fetch('/api/waitlist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, source: 'landing-page', timestamp: new Date().toISOString() })
+        });
+
+        if (!res.ok) throw new Error('API unavailable');
+      } catch {
+        // Fallback: store in localStorage so data isn't lost
+        const existing = JSON.parse(localStorage.getItem('waitlist') || '[]');
+        existing.push({ email, source: 'landing-page', timestamp: new Date().toISOString() });
+        localStorage.setItem('waitlist', JSON.stringify(existing));
+      }
+
+      // Show success
+      if (form) form.style.display = 'none';
+      if (success) success.style.display = 'block';
+    }
+
+    document.getElementById('waitlistForm')?.addEventListener('submit', (e) => {
+      e.preventDefault();
+      handleWaitlistSubmit(document.getElementById('emailInput').value, 'waitlistForm');
+    });
+
+    document.getElementById('waitlistForm2')?.addEventListener('submit', (e) => {
+      e.preventDefault();
+      handleWaitlistSubmit(document.getElementById('emailInput2').value, 'waitlistForm2');
+    });
+
+    // Smooth scroll for nav links
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+      anchor.addEventListener('click', (e) => {
+        e.preventDefault();
+        document.querySelector(anchor.getAttribute('href'))?.scrollIntoView({ behavior: 'smooth' });
+      });
+    });
+  </script>
+</body>
+</html>

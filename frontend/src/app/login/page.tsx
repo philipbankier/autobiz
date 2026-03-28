@@ -37,8 +37,10 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-950">
       <Card className="w-full max-w-md p-8 bg-gray-900 border-gray-800">
-        <h1 className="text-2xl font-bold text-white mb-2">Sign in to AutoBiz</h1>
-        <p className="text-gray-400 mb-6">Your autonomous business empire awaits</p>
+        <h1 className="text-2xl font-bold text-white mb-2">Welcome back</h1>
+        <p className="text-gray-400 mb-6">
+          Sign in to manage your businesses
+        </p>
 
         {error && (
           <div className="bg-red-900/30 border border-red-800 text-red-300 px-4 py-2 rounded mb-4">
@@ -69,14 +71,18 @@ export default function LoginPage() {
               className="bg-gray-800 border-gray-700 text-white"
             />
           </div>
-          <Button type="submit" className="w-full" disabled={loading}>
+          <Button
+            type="submit"
+            className="w-full bg-emerald-500 hover:bg-emerald-600 text-white"
+            disabled={loading}
+          >
             {loading ? "Signing in..." : "Sign In"}
           </Button>
         </form>
 
         <p className="text-gray-500 text-sm mt-4 text-center">
           Don&apos;t have an account?{" "}
-          <Link href="/register" className="text-blue-400 hover:underline">
+          <Link href="/register" className="text-emerald-400 hover:underline">
             Register
           </Link>
         </p>
