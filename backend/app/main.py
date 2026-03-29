@@ -34,13 +34,15 @@ ALLOWED_ORIGINS = [
     "http://127.0.0.1:3000",
     "http://127.0.0.1:3001",
     "https://autobiz-app.vercel.app",
+    "https://oneidea.app",
+    "https://www.oneidea.app",
     "http://127.0.0.1:3002",
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_origin_regex=r"https://.*\.(autobiz\.app|vercel\.app)",
+    allow_origin_regex=r"https://.*\.(autobiz\.app|vercel\.app|oneidea\.app)",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
