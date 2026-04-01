@@ -612,6 +612,9 @@
   </footer>
 
   <script>
+    // ─── API base URL (injected at build time by CI, or empty for same-origin) ─
+    window.FLOWTEST_API_BASE = '';
+
     // ─── UTM parameter capture ─────────────────────────────────────────────
     (function captureUTM() {
       const params = new URLSearchParams(window.location.search);
@@ -652,7 +655,7 @@
       };
 
       try {
-        const res = await fetch('/api/waitlist', {
+        const res = await fetch((window.FLOWTEST_API_BASE || '') + '/api/waitlist', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)

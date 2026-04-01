@@ -776,9 +776,11 @@
 
 <script>
 // ── CONFIG ──
-// When served by the API server, relative URLs work.
+// FLOWTEST_API_BASE is injected by CI (GitHub Actions) when the Railway URL is known.
+// When served by the API server directly, relative URLs work fine.
 // If opening file:// directly, set this to 'http://localhost:3000'
-const API_BASE = '';
+window.FLOWTEST_API_BASE = window.FLOWTEST_API_BASE || '';
+const API_BASE = window.FLOWTEST_API_BASE;
 
 // ── STORAGE KEYS ──
 const STORAGE_PROJECT_ID  = 'flowtest_project_id';

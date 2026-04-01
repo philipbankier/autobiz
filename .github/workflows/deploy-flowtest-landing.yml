@@ -1,0 +1,52 @@
+name: Deploy FlowTest Landing Page
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'sites/e2e-1773572738/**'
+      - '.github/workflows/deploy-flowtest-landing.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Inject API URL
+        run: |
+          # If FLOWTEST_API_URL secret is set, patch the fetch URL in index.html
+          if [ -n "${{ secrets.FLOWTEST_API_URL }}" ]; then
+            sed -i "s|/api/waitlist|${{ secrets.FLOWTEST_API_URL }}/api/waitlist|g" sites/e2e-1773572738/index.html
+            sed -i "s|window.FLOWTEST_API_BASE = ''|window.FLOWTEST_API_BASE = '${{ secrets.FLOWTEST_API_URL }}'|g" sites/e2e-1773572738/index.html
+            sed -i "s|window.FLOWTEST_API_BASE = ''|window.FLOWTEST_API_BASE = '${{ secrets.FLOWTEST_API_URL }}'|g" sites/e2e-1773572738/dashboard.html
+            echo "Patched API URL to: ${{ secrets.FLOWTEST_API_URL }}"
+          else
+            echo "No FLOWTEST_API_URL secret found — landing page will use relative /api/ path (works with CORS proxy or same-origin)"
+          fi
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: 'sites/e2e-1773572738'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
