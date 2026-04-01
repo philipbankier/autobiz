@@ -2,7 +2,7 @@ name: Deploy FlowTest Landing Page
 
 on:
   push:
-    branches: [main]
+    branches: [master]
     paths:
       - 'sites/e2e-1773572738/**'
       - '.github/workflows/deploy-flowtest-landing.yml'
