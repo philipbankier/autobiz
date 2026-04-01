@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_API_BASE: str = "http://host.docker.internal:8321"
     OPENCLAW_GATEWAY_URL: str = "http://127.0.0.1:18789"
+    WEBHOOK_SECRET: str = ""
     OPENCLAW_GATEWAY_TOKEN: str = ""
 
     model_config = {

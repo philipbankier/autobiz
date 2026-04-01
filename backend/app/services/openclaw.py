@@ -405,7 +405,7 @@ async def _spawn_via_anthropic(
     return {"status": "error", "message": "No LLM available: set ANTHROPIC_API_KEY or ensure local proxy is running"}
 
 
-def _apply_agent_output(output: str, workspace: Path, department_type: str) -> None:
+def _apply_agent_output(output: str, workspace: Path, department_type: str) -> list[str]:
     """
     Parse agent output for file write instructions and apply them.
     Looks for markdown code blocks with file paths as titles.
@@ -414,14 +414,28 @@ def _apply_agent_output(output: str, workspace: Path, department_type: str) -> N
       ```
       content here
       ```
+    Returns list of relative paths written.
     """
     import re
+    from app.services.event_bus import publish_sync, EventType
 
     # Pattern: ### File: <path>\n```\n<content>\n```
     pattern = re.compile(
         r"###\s+(?:File|UPDATE|Write):\s*`?([^\n`]+)`?\n```[^\n]*\n(.*?)```",
         re.DOTALL | re.IGNORECASE,
     )
+    written: list[str] = []
+    # Extract company_id from COMPANY.md if available (for SSE events)
+    company_id = None
+    company_md = workspace / "COMPANY.md"
+    if company_md.exists():
+        for line in company_md.read_text().splitlines():
+            if line.startswith("## ID"):
+                continue
+            if company_id is None and len(line.strip()) > 10 and "-" in line.strip():
+                company_id = line.strip()
+                break
+
     for match in pattern.finditer(output):
         rel_path = match.group(1).strip()
         content = match.group(2)
@@ -433,9 +447,20 @@ def _apply_agent_output(output: str, workspace: Path, department_type: str) -> N
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content)
+            written.append(rel_path)
             logger.info(f"Agent wrote: {rel_path}")
         except Exception as e:
             logger.warning(f"Failed to write agent output file {rel_path}: {e}")
+
+    if written:
+        logger.info(f"[{workspace.name}/{department_type}] Wrote {len(written)} files: {written}")
+    else:
+        logger.warning(
+            f"[{workspace.name}/{department_type}] No file blocks found in agent output "
+            f"({len(output)} chars). Agent may not have used the required output format."
+        )
+
+    return written
 
 
 async def spawn_agent_session(

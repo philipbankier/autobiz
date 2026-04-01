@@ -115,13 +115,32 @@ async def stripe_webhook(request: Request):
     return {"status": "ok", "triggered": False, "event_type": event_type}
 
 
+def _verify_webhook_signature(body: bytes, signature: str | None, secret: str) -> bool:
+    """Verify HMAC-SHA256 webhook signature."""
+    if not secret or not signature:
+        return False
+    expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    # Vercel sends raw hex, GitHub sends "sha256=<hex>"
+    sig_hex = signature.removeprefix("sha256=")
+    return hmac.compare_digest(expected, sig_hex)
+
+
 @router.post("/vercel")
 async def vercel_webhook(request: Request):
     """
     Vercel deploy webhook — triggers developer agent on deploy events.
     Route: POST /webhooks/vercel
     """
-    body = await request.json()
+    raw_body = await request.body()
+
+    # Verify signature if WEBHOOK_SECRET is configured
+    webhook_secret = settings.WEBHOOK_SECRET
+    if webhook_secret:
+        sig = request.headers.get("x-vercel-signature", "")
+        if not _verify_webhook_signature(raw_body, sig, webhook_secret):
+            raise HTTPException(status_code=400, detail="Invalid webhook signature")
+
+    body = json.loads(raw_body)
 
     # Vercel sends deployment events
     deploy_type = body.get("type", "")
@@ -164,12 +183,21 @@ async def vercel_webhook(request: Request):
 async def github_webhook(
     request: Request,
     x_github_event: Optional[str] = Header(None),
+    x_hub_signature_256: Optional[str] = Header(None),
 ):
     """
     GitHub webhook — triggers developer agent on PR/push/issue events.
     Route: POST /webhooks/github
     """
-    body = await request.json()
+    raw_body = await request.body()
+
+    # Verify GitHub signature if WEBHOOK_SECRET is configured
+    webhook_secret = settings.WEBHOOK_SECRET
+    if webhook_secret:
+        if not _verify_webhook_signature(raw_body, x_hub_signature_256, webhook_secret):
+            raise HTTPException(status_code=400, detail="Invalid webhook signature")
+
+    body = json.loads(raw_body)
     event_type = x_github_event or body.get("action", "unknown")
 
     # Extract repo name
