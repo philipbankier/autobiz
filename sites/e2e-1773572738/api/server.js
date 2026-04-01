@@ -1,10 +1,12 @@
 /**
  * FlowTest API Server
  * E2E Test Company — MVP API (SQLite-backed)
+ * v0.3.0 — Railway-compatible (waitlist stored in SQLite, not filesystem)
  *
  * Endpoints:
  *   GET  /health              — health check
  *   POST /api/waitlist        — add email to waitlist
+ *   GET  /api/waitlist        — list waitlist entries (internal use)
  *   POST /api/projects        — create project + API key
  *   GET  /api/projects/:id    — get project
  *   POST /api/runs            — ingest test run (auth required)
@@ -28,8 +30,6 @@ const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '../data');
 const DB_PATH = process.env.DB_PATH || path.join(DATA_DIR, 'flowtest.db');
-const WAITLIST_FILE = process.env.WAITLIST_FILE ||
-  path.join(__dirname, '../../../companies/e2e-1773572738/waitlist.json');
 
 // Ensure data directory exists
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -88,6 +88,16 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_runs_triggered_at   ON runs(triggered_at DESC);
   CREATE INDEX IF NOT EXISTS idx_test_results_run_id ON test_results(run_id);
   CREATE INDEX IF NOT EXISTS idx_flakiness_project   ON flakiness(project_id, flakiness_rate DESC);
+
+  CREATE TABLE IF NOT EXISTS waitlist (
+    email      TEXT PRIMARY KEY,
+    name       TEXT,
+    source     TEXT,
+    utm_source TEXT,
+    utm_medium TEXT,
+    utm_campaign TEXT,
+    joined_at  TEXT NOT NULL
+  );
 `);
 
 // ─── Prepared Statements ───────────────────────────────────────────────────
@@ -117,6 +127,14 @@ const stmts = {
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `),
   getTestResultsByRun: db.prepare('SELECT * FROM test_results WHERE run_id = ?'),
+
+  // Waitlist
+  getWaitlistEntry: db.prepare('SELECT email FROM waitlist WHERE email = ?'),
+  insertWaitlistEntry: db.prepare(`
+    INSERT OR IGNORE INTO waitlist (email, name, source, utm_source, utm_medium, utm_campaign, joined_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `),
+  listWaitlist: db.prepare('SELECT email, name, source, utm_source, utm_medium, utm_campaign, joined_at FROM waitlist ORDER BY joined_at DESC'),
 
   // Flakiness
   upsertFlakiness: db.prepare(`
@@ -196,9 +214,8 @@ if (fs.existsSync(staticRoot)) {
 app.get('/health', async () => ({
   status: 'ok',
   service: 'flowtest-api',
-  version: '0.2.0',
+  version: '0.3.0',
   storage: 'sqlite',
-  db_path: DB_PATH,
   uptime_seconds: Math.floor(process.uptime()),
   timestamp: new Date().toISOString(),
 }));
@@ -212,37 +229,44 @@ app.post('/api/waitlist', {
       properties: {
         email: { type: 'string', format: 'email' },
         name: { type: 'string' },
+        source: { type: 'string' },
+        utm_source: { type: 'string' },
+        utm_medium: { type: 'string' },
+        utm_campaign: { type: 'string' },
       },
     },
   },
 }, async (request, reply) => {
-  const { email, name } = request.body;
+  const { email, name, source, utm_source, utm_medium, utm_campaign } = request.body;
 
-  let waitlist = [];
-  try {
-    if (fs.existsSync(WAITLIST_FILE)) {
-      waitlist = JSON.parse(fs.readFileSync(WAITLIST_FILE, 'utf8'));
-    }
-  } catch (e) {
-    app.log.warn('Could not read waitlist file:', e.message);
-  }
-
-  if (waitlist.some(entry => entry.email === email)) {
+  // Check for duplicate
+  const existing = stmts.getWaitlistEntry.get(email);
+  if (existing) {
     return reply.code(200).send({ success: true, message: 'Already on the waitlist!' });
   }
 
-  const entry = { email, name: name || null, joined_at: new Date().toISOString() };
-  waitlist.push(entry);
+  const result = stmts.insertWaitlistEntry.run(
+    email,
+    name || null,
+    source || null,
+    utm_source || null,
+    utm_medium || null,
+    utm_campaign || null,
+    new Date().toISOString()
+  );
 
-  try {
-    fs.mkdirSync(path.dirname(WAITLIST_FILE), { recursive: true });
-    fs.writeFileSync(WAITLIST_FILE, JSON.stringify(waitlist, null, 2));
-  } catch (e) {
-    app.log.error('Could not write waitlist file:', e.message);
-    return reply.code(500).send({ success: false, message: 'Failed to save email' });
+  if (result.changes === 0) {
+    return reply.code(200).send({ success: true, message: 'Already on the waitlist!' });
   }
 
+  app.log.info(`Waitlist signup: ${email} (source: ${source || utm_source || 'direct'})`);
   reply.code(201).send({ success: true, message: "You're on the waitlist! We'll be in touch." });
+});
+
+/** GET /api/waitlist — internal use, lists all signups */
+app.get('/api/waitlist', async (request, reply) => {
+  const entries = stmts.listWaitlist.all();
+  return { entries, total: entries.length };
 });
 
 /** POST /api/projects */
@@ -420,7 +444,7 @@ process.on('SIGINT', () => {
 const start = async () => {
   try {
     await app.listen({ port: PORT, host: HOST });
-    app.log.info(`FlowTest API v0.2.0 (SQLite) running on http://${HOST}:${PORT}`);
+    app.log.info(`FlowTest API v0.3.0 (SQLite, Railway-ready) running on http://${HOST}:${PORT}`);
     app.log.info(`Database: ${DB_PATH}`);
     app.log.info(`Health: http://localhost:${PORT}/health`);
   } catch (err) {
